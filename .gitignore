@@ -1,0 +1,8 @@
+bios/
+*.bin
+*.iso
+*.ppm
+desktop/run3do
+tools/cputest/host
+tools/cputest/harness
+tools/cputest/*.elf

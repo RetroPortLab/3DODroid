@@ -1,0 +1,50 @@
+/* 3DODroid - system state shared by all chips */
+#pragma once
+#include <stdint.h>
+#include <stddef.h>
+#include "arm60.h"
+
+#define RAM_SIZE   0x00300000u   /* 2MB DRAM + 1MB VRAM, contiguous */
+#define ROM_SIZE   0x00100000u
+#define NVRAM_SIZE 0x8000u
+
+typedef struct {
+    uint8_t  ram[RAM_SIZE];      /* stored as host-endian 32-bit words */
+    uint32_t rom_w[ROM_SIZE / 4];
+    uint8_t  nvram[NVRAM_SIZE];
+    int nvram_dirty;
+    int rom_overlay;
+    int log_unknown, unk_logged;
+    uint32_t sport_mode, sport_color, sport_src;
+    uint64_t frame;
+    uint32_t fb[320 * 240];      /* last presented frame, XRGB8888 */
+} Sys3do;
+
+extern Sys3do sys;
+
+void sys_init(void);
+int  sys_load_bios(const uint8_t *data, size_t len);
+void sys_run_frame(void);
+
+uint32_t mem_rd32(uint32_t a);
+void     mem_wr32(uint32_t a, uint32_t v);
+uint16_t mem_rd16(uint32_t a);
+void     mem_wr16(uint32_t a, uint16_t v);
+uint8_t  mem_rd8(uint32_t a);
+
+/* MADAM: memory controller, cel engine, matrix engine, DMA */
+void madam_reset(void);
+uint32_t madam_read(uint32_t off);
+void madam_write(uint32_t off, uint32_t v);
+
+/* CLIO: interrupts, timers, video counters, DSP, XBUS */
+void clio_reset(void);
+uint32_t clio_read(uint32_t off);
+void clio_write(uint32_t off, uint32_t v);
+void clio_set_line(int line);
+void clio_tick(int cycles);
+int  clio_fiq_pending(void);
+void clio_raise(int word, uint32_t bits);
+
+void sport_write(uint32_t off, uint32_t v);
+void video_scanline(int line);
