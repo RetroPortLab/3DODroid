@@ -7,3 +7,4 @@ tools/cputest/host
 tools/cputest/harness
 tools/cputest/*.elf
 build/
+tools/disctest/disctest
