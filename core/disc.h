@@ -17,6 +17,13 @@ typedef struct Disc Disc;
 
 /* Opens .iso, .bin, .cue or .chd. Returns NULL and fills err on failure. */
 Disc *disc_open(const char *path, char *err, int errlen);
+/* Same, with the image type given separately ("chd", "cue", "iso", "bin"), for
+ * paths without a usable extension such as /proc/self/fd/N on Android. */
+Disc *disc_open_as(const char *path, const char *type, char *err, int errlen);
+/* Optional: maps a CUE sheet's FILE name to an openable path (Android passes
+ * /proc/self/fd/N for files it opened through the storage framework).
+ * Return NULL to use the name relative to the cue's folder. */
+extern const char *(*disc_cue_resolver)(const char *name);
 void disc_close(Disc *d);
 
 int disc_track_count(const Disc *d);

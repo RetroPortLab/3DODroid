@@ -88,6 +88,8 @@ static Disc *open_cue(const char *path, char *err, int errlen) {
             if (q1 && q2) { memcpy(name, q1 + 1, (size_t)(q2 - q1 - 1)); }
             else sscanf(p + 4, " %899s", name);
             char full[2048]; snprintf(full, sizeof full, "%s%s", (name[0] == '/' ? "" : dir), name);
+            const char *mapped = disc_cue_resolver ? disc_cue_resolver(name) : NULL;
+            if (mapped) snprintf(full, sizeof full, "%s", mapped);
             if (curf) {                                     /* close out previous file's span */
                 file_lba_base += (uint32_t)(curf_size / (uint64_t)(d->src[ti >= 0 ? ti : 0].sector_size ? d->src[ti >= 0 ? ti : 0].sector_size : 2352));
             }
@@ -206,8 +208,13 @@ static int chd_frame(Disc *d, int ti, uint32_t lba, const uint8_t **out) {
 }
 
 /* ---------- common ---------- */
+const char *(*disc_cue_resolver)(const char *name);
+
 Disc *disc_open(const char *path, char *err, int errlen) {
-    const char *e = ext_of(path);
+    return disc_open_as(path, ext_of(path), err, errlen);
+}
+
+Disc *disc_open_as(const char *path, const char *e, char *err, int errlen) {
     if (!strcasecmp(e, "chd")) return open_chd(path, err, errlen);
     if (!strcasecmp(e, "cue")) return open_cue(path, err, errlen);
     if (!strcasecmp(e, "iso") || !strcasecmp(e, "bin") || !strcasecmp(e, "img")) return open_flat(path, err, errlen);

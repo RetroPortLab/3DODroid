@@ -23,8 +23,11 @@ static struct {
     int dsp_acc;
 } c;
 
+static void dsp_dma_reset(void);
+
 void clio_reset(void) {
     memset(&c, 0, sizeof c);
+    dsp_dma_reset();
     c.slack = 0x150;
     c.seed = 0x12345678;
     c.reg[0x28 >> 2] = 0x01;          /* cstatbits: power-on reset */
@@ -69,6 +72,12 @@ void clio_set_line(int line) {
 #define DSP_DMA_CHANNELS 13
 static int64_t dsp_dma_acc[DSP_DMA_CHANNELS];
 static uint32_t dsp_dma_on;
+
+static void dsp_dma_reset(void) {
+    memset(dsp_dma_acc, 0, sizeof dsp_dma_acc);
+    dsp_dma_on = 0;
+    dsp_dma_next_pending = 0;
+}
 
 static void dsp_dma_tick(int cycles) {
     for (int ch = 0; ch < DSP_DMA_CHANNELS; ch++) {
