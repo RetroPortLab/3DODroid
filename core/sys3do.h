@@ -14,7 +14,8 @@ typedef struct {
     uint8_t  nvram[NVRAM_SIZE];
     int nvram_dirty;
     int rom_overlay;
-    int log_unknown, unk_logged;
+    int log_unknown, unk_logged, log_irq, log_cap;
+    uint32_t irq_watch;               /* debug: backtrace when these mask0 bits are cleared */
     uint32_t sport_color;
     uint8_t sport_buf[0x800];
     uint64_t frame;
@@ -26,6 +27,7 @@ extern Sys3do sys;
 void sys_init(void);
 int  sys_load_bios(const uint8_t *data, size_t len);
 void sys_run_frame(void);
+void sys_backtrace(const char *why);
 
 uint32_t mem_rd32(uint32_t a);
 void     mem_wr32(uint32_t a, uint32_t v);

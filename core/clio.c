@@ -4,6 +4,7 @@
 #include "sys3do.h"
 #include <string.h>
 #include <stdio.h>
+#include "xbus.h"
 
 static struct {
     uint32_t reg[0x10000 / 4];       /* shadow of everything written */
@@ -29,7 +30,14 @@ void clio_raise(int word, uint32_t bits) {
     if (c.pend[1] & c.mask[1]) c.pend[0] |= 0x80000000u;   /* second word cascades into bit 31 */
 }
 
+/* XBUS interrupt (word 0 bit 2) is level-triggered: it follows the
+ * devices' enabled status/data-ready state rather than latching. */
+static void sync_levels(void) {
+    if (xbus_irq_pending()) c.pend[0] |= 1u << 2; else c.pend[0] &= ~(1u << 2);
+}
+
 int clio_fiq_pending(void) {
+    sync_levels();
     if (c.pend[1] & c.mask[1]) c.pend[0] |= 0x80000000u;
     return (c.pend[0] & c.mask[0]) != 0;
 }
@@ -68,6 +76,7 @@ void clio_tick(int cycles) {
 }
 
 uint32_t clio_read(uint32_t off) {
+    if (off >= 0x500 && off < 0x600) return xbus_read(off & ~0x3Fu);
     switch (off) {
     case 0x00: return 0x02020000;               /* CLIO revision */
     case 0x08: return c.vint0;
@@ -75,7 +84,7 @@ uint32_t clio_read(uint32_t off) {
     case 0x30: return 0;                        /* hcnt */
     case 0x34: return c.line | (c.field << 11); /* vcnt + field */
     case 0x3C: c.seed = c.seed * 1103515245u + 12345u; return c.seed;
-    case 0x40: case 0x44: return c.pend[0];
+    case 0x40: case 0x44: sync_levels(); return c.pend[0];
     case 0x48: case 0x4C: return c.mask[0];
     case 0x60: case 0x64: return c.pend[1];
     case 0x68: case 0x6C: return c.mask[1];
@@ -93,18 +102,21 @@ uint32_t clio_read(uint32_t off) {
 }
 
 void clio_write(uint32_t off, uint32_t v) {
+    if (off >= 0x500 && off < 0x600) { xbus_write(off & ~0x3Fu, v); return; }
     c.reg[(off >> 2) & 0x3FFF] = v;
     switch (off) {
     case 0x08: c.vint0 = v; return;
     case 0x0C: c.vint1 = v; return;
     case 0x40: clio_raise(0, v); return;
     case 0x44: c.pend[0] &= ~v; return;
-    case 0x48: c.mask[0] |= v; return;
-    case 0x4C: c.mask[0] &= ~v; return;
+    case 0x48: if (sys.irq_watch && (v & sys.irq_watch)) sys_backtrace("mask0 set");
+        if (sys.log_irq) fprintf(stderr, "[irq] mask0 |= %08x pc=%08x\n", v, arm.cur_pc); c.mask[0] |= v; return;
+    case 0x4C: if (sys.irq_watch && (v & sys.irq_watch)) sys_backtrace("mask0 clear");
+        if (sys.log_irq) fprintf(stderr, "[irq] mask0 &= ~%08x pc=%08x\n", v, arm.cur_pc); c.mask[0] &= ~v; return;
     case 0x60: clio_raise(1, v); return;
     case 0x64: c.pend[1] &= ~v; if (!(c.pend[1] & c.mask[1])) c.pend[0] &= ~0x80000000u; return;
-    case 0x68: c.mask[1] |= v; return;
-    case 0x6C: c.mask[1] &= ~v; return;
+    case 0x68: if (sys.log_irq) fprintf(stderr, "[irq] mask1 |= %08x pc=%08x\n", v, arm.cur_pc); c.mask[1] |= v; return;
+    case 0x6C: if (sys.log_irq) fprintf(stderr, "[irq] mask1 &= ~%08x pc=%08x\n", v, arm.cur_pc); c.mask[1] &= ~v; return;
     case 0x200: c.timer_ctl |= v; return;
     case 0x204: c.timer_ctl &= ~(uint64_t)v; return;
     case 0x208: c.timer_ctl |= (uint64_t)v << 32; return;
@@ -117,7 +129,7 @@ void clio_write(uint32_t off, uint32_t v) {
         if (off & 4) c.timer_bak[t] = v & 0xFFFF; else c.timer_cnt[t] = v & 0xFFFF;
         return;
     }
-    if (sys.log_unknown && sys.unk_logged < 400) {
+    if (sys.log_unknown && sys.unk_logged < sys.log_cap) {
         sys.unk_logged++;
         fprintf(stderr, "[clio] wr %03x = %08x pc=%08x\n", off, v, arm.cur_pc);
     }

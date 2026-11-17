@@ -8,13 +8,14 @@
  *   0x03400000             CLIO
  */
 #include "sys3do.h"
+#include "xbus.h"
 #include <string.h>
 #include <stdio.h>
 
 Sys3do sys;
 
 static void unk(const char *what, uint32_t a, uint32_t v) {
-    if (sys.log_unknown && sys.unk_logged < 400) {
+    if (sys.log_unknown && sys.unk_logged < sys.log_cap) {
         sys.unk_logged++;
         fprintf(stderr, "[bus] %s %08x = %08x  pc=%08x\n", what, a, v, arm.cur_pc);
     }
@@ -74,8 +75,8 @@ void bus_write8(uint32_t a, uint8_t v) {
 }
 
 /* guest memory helpers for the chips (big-endian word view) */
-uint32_t mem_rd32(uint32_t a) { a &= (RAM_SIZE - 1) & ~3u; return ram_rd(a); }
-void mem_wr32(uint32_t a, uint32_t v) { a &= (RAM_SIZE - 1) & ~3u; ram_wr(a, v); }
+uint32_t mem_rd32(uint32_t a) { a &= ~3u; return a < RAM_SIZE ? ram_rd(a) : 0; }
+void mem_wr32(uint32_t a, uint32_t v) { a &= ~3u; if (a < RAM_SIZE) ram_wr(a, v); }
 uint16_t mem_rd16(uint32_t a) { uint32_t w = mem_rd32(a); return (a & 2) ? (uint16_t)w : (uint16_t)(w >> 16); }
 void mem_wr16(uint32_t a, uint16_t v) {
     uint32_t w = mem_rd32(a);
@@ -121,6 +122,7 @@ void sys_init(void) {
     sys.rom_overlay = 1;
     madam_reset();
     clio_reset();
+    cdrom_init();
     arm_reset();
 }
 
@@ -147,4 +149,17 @@ void sys_run_frame(void) {
         if (arm.halted) break;
     }
     sys.frame++;
+}
+
+/* APCS frame-pointer walk, for debugging the BIOS */
+void sys_backtrace(const char *why) {
+    fprintf(stderr, "[bt] %s at pc=%08x lr=%08x mode=%02x:", why, arm.cur_pc, arm.r[14], arm.mode);
+    uint32_t fp = arm.r[11];
+    for (int i = 0; i < 12 && fp > 0x1000 && fp < RAM_SIZE; i++) {
+        uint32_t lr = mem_rd32(fp - 4), prev = mem_rd32(fp - 12);
+        fprintf(stderr, " %08x", lr);
+        if (prev <= fp) break;
+        fp = prev;
+    }
+    fprintf(stderr, "\n");
 }

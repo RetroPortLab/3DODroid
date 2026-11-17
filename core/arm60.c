@@ -186,6 +186,7 @@ static int exec_sdt(uint32_t ins, uint32_t pc) {
         uint32_t v;
         if (b) v = bus_read8(addr);
         else v = ror(bus_read32(addr & ~3u), (addr & 3) * 8);
+        if (arm.abort_req) { arm.abort_req = 0; exception(0x10, M_ABT, pc + 8, 0); return 4; }
         if (!p || w) R[rn] = nb;
         if (rd == 15) { R[15] = v & ~3u; return 5; }
         R[rd] = v;
@@ -193,6 +194,7 @@ static int exec_sdt(uint32_t ins, uint32_t pc) {
     }
     uint32_t v = rd == 15 ? pc + 12 : R[rd];
     if (b) bus_write8(addr, (uint8_t)v); else bus_write32(addr & ~3u, v);
+    if (arm.abort_req) { arm.abort_req = 0; exception(0x10, M_ABT, pc + 8, 0); return 4; }
     if (!p || w) R[rn] = nb;
     return 2;
 }
@@ -215,6 +217,7 @@ static int exec_bdt(uint32_t ins, uint32_t pc) {
         if (userbank) switch_mode(M_USR);
         for (int i = 0; i < 16; i++) if (list & (1u << i)) {
             uint32_t v = bus_read32(a); a += 4;
+            if (arm.abort_req) { arm.abort_req = 0; if (userbank) switch_mode(saved_mode); exception(0x10, M_ABT, pc + 8, 0); return 4; }
             if (i == 15) {
                 if (sbit && arm.mode != M_USR && arm.mode != M_SYS) arm_set_cpsr(arm.spsr);
                 R[15] = v & ~3u;

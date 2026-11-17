@@ -2,6 +2,7 @@
  *   run3do <bios.bin> [frames] [--trace] [--shot out.ppm]
  */
 #include "../core/sys3do.h"
+#include "../core/xbus.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,7 +33,10 @@ int main(int argc, char **argv) {
     if (!bios) { perror(argv[1]); return 1; }
     int frames = 120; const char *shot = NULL;
     for (int i = 2; i < argc; i++) {
-        if (!strcmp(argv[i], "--trace")) sys.log_unknown = 1;
+        if (!strcmp(argv[i], "--trace")) { sys.log_unknown = 1; if (!sys.log_cap) sys.log_cap = 400; }
+        else if (!strcmp(argv[i], "--tracecap") && i + 1 < argc) sys.log_cap = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--xbus")) xbus_log = 1;
+        else if (!strcmp(argv[i], "--irq")) sys.log_irq = 1;
         else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--branches") && i + 1 < argc) { trace_left = atol(argv[++i]); arm.trace_hook = on_branch; }
         else frames = atoi(argv[i]);
