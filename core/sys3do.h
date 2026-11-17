@@ -15,7 +15,8 @@ typedef struct {
     int nvram_dirty;
     int rom_overlay;
     int log_unknown, unk_logged;
-    uint32_t sport_mode, sport_color, sport_src;
+    uint32_t sport_color;
+    uint8_t sport_buf[0x800];
     uint64_t frame;
     uint32_t fb[320 * 240];      /* last presented frame, XRGB8888 */
 } Sys3do;
@@ -46,5 +47,6 @@ void clio_tick(int cycles);
 int  clio_fiq_pending(void);
 void clio_raise(int word, uint32_t bits);
 
-void sport_write(uint32_t off, uint32_t v);
+uint32_t sport_read(uint32_t off);
+void sport_write(uint32_t off, uint32_t mask);
 void video_scanline(int line);

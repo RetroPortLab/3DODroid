@@ -34,6 +34,7 @@ uint32_t bus_read32(uint32_t a) {
     }
     if (a >= 0x03000000 && a < 0x03000000 + ROM_SIZE) return sys.rom_w[(a - 0x03000000) >> 2];
     if (a >= 0x03140000 && a < 0x03180000) return sys.nvram[((a - 0x03140000) >> 2) & (NVRAM_SIZE - 1)];
+    if (a >= 0x03200000 && a < 0x03300000) return sport_read(a - 0x03200000);
     if (a >= 0x03300000 && a < 0x03400000) return madam_read(a - 0x03300000);
     if (a >= 0x03400000 && a < 0x03500000) return clio_read(a - 0x03400000);
     unk("rd32", a, 0);
@@ -83,18 +84,36 @@ void mem_wr16(uint32_t a, uint16_t v) {
 }
 uint8_t mem_rd8(uint32_t a) { return (uint8_t)(mem_rd32(a) >> ((3 - (a & 3)) * 8)); }
 
-/* SPORT: VRAM serial-port page operations (flash fill / copy), 2KB pages */
-void sport_write(uint32_t off, uint32_t v) {
-    uint32_t page = (off & 0x1FFFF) ? off : off;   /* address bits select destination page */
-    uint32_t dst = (page << 2) & 0xFFFFF;          /* SPORT window maps VRAM pages */
-    dst = 0x200000 + (dst & ~0x7FFu);
-    (void)dst;
-    if (sys.sport_mode == 1) {                     /* flash write: fill page with colour latch */
-        for (uint32_t i = 0; i < 0x800; i += 4) mem_wr32(dst + i, sys.sport_color);
-    } else if (sys.sport_mode == 0 && sys.sport_src) {
-        memmove(sys.ram + dst, sys.ram + sys.sport_src, 0x800);
+/* SPORT: VRAM serial-port page operations, 2KB pages.
+ * The byte offset's bits [10:2] pick one of 512 2KB VRAM pages (page address =
+ * VRAM base + offset<<9). Bits [14:13] select the operation:
+ *   0x0000 copy (serial register -> page), 0x2000 set flash colour,
+ *   0x4000 flash-write (colour -> page). All writes go through the mask.
+ *   read  -> latch that page into the serial register
+ *   write -> copy the serial register (or the flash colour) into that page,
+ *            through the written bit mask */
+static uint32_t sport_page(uint32_t off) { return 0x200000u + (((off >> 2) & 0x1FFu) << 11); }
+
+uint32_t sport_read(uint32_t off) {
+    if (off & 0x6000) return 0;
+    if (sys.log_unknown) fprintf(stderr, "[sport] rd %05x pc=%08x\n", off, arm.cur_pc);
+    uint32_t pg = sport_page(off);
+    if (pg + 0x800 <= RAM_SIZE) memcpy(sys.sport_buf, sys.ram + pg, 0x800);
+    return 0;
+}
+
+void sport_write(uint32_t off, uint32_t mask) {
+    if (sys.log_unknown) fprintf(stderr, "[sport] wr %05x mask=%08x pc=%08x\n", off, mask, arm.cur_pc);
+    uint32_t pg = sport_page(off);
+    if (pg + 0x800 > RAM_SIZE) { unk("sport", off, mask); return; }
+    uint32_t *d = (uint32_t *)(sys.ram + pg);
+    if ((off & 0x6000) == 0x2000) { sys.sport_color = mask; return; }
+    if (off & 0x4000) {
+        for (int i = 0; i < 0x200; i++) d[i] = (d[i] & ~mask) | (sys.sport_color & mask);
+    } else {
+        const uint32_t *s = (const uint32_t *)sys.sport_buf;
+        for (int i = 0; i < 0x200; i++) d[i] = (d[i] & ~mask) | (s[i] & mask);
     }
-    unk("sport", off, v);
 }
 
 void sys_init(void) {

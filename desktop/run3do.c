@@ -20,6 +20,12 @@ static void write_ppm(const char *p) {
     fclose(f);
 }
 
+static long trace_left;
+static void on_branch(uint32_t from, uint32_t to) {
+    if (from >= 0x100 && from < 0x130 && to >= 0x100 && to < 0x130) return;
+    if (trace_left > 0) { trace_left--; fprintf(stderr, "  br %08x -> %08x  mode=%02x\n", from, to, arm.mode); }
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: run3do bios.bin [frames] [--trace] [--shot file.ppm]\n"); return 1; }
     size_t len; uint8_t *bios = slurp(argv[1], &len);
@@ -28,9 +34,12 @@ int main(int argc, char **argv) {
     for (int i = 2; i < argc; i++) {
         if (!strcmp(argv[i], "--trace")) sys.log_unknown = 1;
         else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
+        else if (!strcmp(argv[i], "--branches") && i + 1 < argc) { trace_left = atol(argv[++i]); arm.trace_hook = on_branch; }
         else frames = atoi(argv[i]);
     }
+    void (*hook)(uint32_t, uint32_t) = arm.trace_hook;
     sys_init();
+    arm.trace_hook = hook;
     if (sys_load_bios(bios, len)) { fprintf(stderr, "BIOS must be 1MB (got %zu bytes)\n", len); return 1; }
     for (int f = 0; f < frames && !arm.halted; f++) sys_run_frame();
     fprintf(stderr, "frames=%llu cycles=%llu pc=%08x mode=%02x\n",

@@ -83,6 +83,7 @@ uint32_t clio_read(uint32_t off) {
     case 0x208: case 0x20C: return (uint32_t)(c.timer_ctl >> 32);
     case 0x220: return c.slack;
     case 0x28: return c.reg[0x28 >> 2];
+    case 0x400: return c.reg[0x400 >> 2] | 0x80;   /* expctl: XBUS idle/ready */
     }
     if (off >= 0x100 && off < 0x180) {
         int t = (off - 0x100) >> 3;

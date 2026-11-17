@@ -14,7 +14,8 @@ typedef struct {
     uint32_t bank_r13[6], bank_r14[6], bank_spsr[6];   /* idx: usr,svc,abt,und,irq,fiq */
     int irq_line, fiq_line;
     int halted;
-    int v4;                            /* test-only: ARMv4 extensions */
+    int v4;
+    void (*trace_hook)(uint32_t from, uint32_t to);   /* called on every non-sequential pc */                            /* test-only: ARMv4 extensions */
     uint32_t cur_pc;
     uint64_t cycles;
 } Arm60;
