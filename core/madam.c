@@ -34,24 +34,28 @@ void madam_fallback_frame(void);
 
 /* Control port: daisy-chained pods shift their data in each field. A
  * standard control pad sends 16 bits: ID 100, then Down Up Right Left A B C
- * P X RShift LShift (1 = pressed), then 00. Zeros after the last pod end
- * the chain. */
+ * P X RShift LShift (1 = pressed), then 00. The event broker parses the
+ * stream from byte 4 of the input buffer; 0xFF after the last pod ends the
+ * chain. */
 uint32_t pad_buttons[2];                    /* event.h layout: ControlDown = bit 31 */
 int pad_count = 1;
 
+static void pbus_put8(uint32_t a, uint8_t v) {
+    uint32_t w = mem_rd32(a & ~3u), sh = (3 - (a & 3)) * 8;
+    mem_wr32(a & ~3u, (w & ~(0xFFu << sh)) | ((uint32_t)v << sh));
+}
+
 static void pbus_transfer(uint32_t in_addr, uint32_t out_addr, uint32_t len) {
     (void)out_addr;
-    for (uint32_t i = 0; i < len; i += 4) mem_wr32(in_addr + i, 0);
-    uint32_t pos = 0;
-    for (int p = 0; p < pad_count && p < 2; p++) {
+    for (uint32_t i = 0; i < len; i++) pbus_put8(in_addr + i, i < 4 ? 0x00 : 0xFF);
+    uint32_t pos = 4;
+    for (int p = 0; p < pad_count && p < 2 && pos + 2 <= len; p++) {
         uint16_t w = (uint16_t)(0x8000u | ((pad_buttons[p] >> 19) & 0x1FFCu));
-        uint32_t a = in_addr + pos, sh = (a & 2) ? 0 : 16;
-        uint32_t word = mem_rd32(a & ~3u);
-        word = (word & ~(0xFFFFu << sh)) | ((uint32_t)w << sh);
-        mem_wr32(a & ~3u, word);
+        pbus_put8(in_addr + pos, (uint8_t)(w >> 8));
+        pbus_put8(in_addr + pos + 1, (uint8_t)w);
         pos += 2;
     }
-}      /* bring-up: frame buffer last drawn by the cel engine */
+}
 
 void madam_write(uint32_t off, uint32_t v) {
     if (off < 0x800) m.reg[off >> 2] = v;
@@ -65,6 +69,7 @@ void madam_write(uint32_t off, uint32_t v) {
         if (v & 0x8000) {                         /* player bus (control port) DMA */
             pbus_transfer(m.reg[0x570 >> 2], m.reg[0x578 >> 2], m.reg[0x574 >> 2] + 4);
             m.reg[0x008 >> 2] &= ~0x8000u;
+            clio_raise(1, 1u << 0);              /* player bus DMA done (interrupt 32) */
         }
         return;
     case 0x100:                                   /* cel engine start */

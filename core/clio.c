@@ -43,8 +43,11 @@ static void sync_levels(void) {
 
 int clio_fiq_pending(void) {
     sync_levels();
-    if (c.pend[1] & c.mask[1]) c.pend[0] |= 0x80000000u;
-    return (c.pend[0] & c.mask[0]) != 0;
+    /* word 1 cascades into word 0 bit 31, which is always enabled in the
+     * word 0 mask (the kernel never sets it but expects to see it) */
+    int w1 = (c.pend[1] & c.mask[1]) != 0;
+    if (w1) c.pend[0] |= 0x80000000u; else c.pend[0] &= ~0x80000000u;
+    return ((c.pend[0] & (c.mask[0] | 0x80000000u))) != 0;
 }
 
 void clio_set_line(int line) {
@@ -57,29 +60,37 @@ void clio_set_line(int line) {
 /* 16 down-counters. Each control nibble: bit0 decrement, bit1 reload,
  * bit2 cascade from previous timer, bit3 interrupt on underflow (odd timers).
  * The prescaler ("slack") sets how many CPU cycles make one timer tick. */
-/* RAM -> DSP input DMA (MADAM 0x400 + 16*ch: addr, len-4, next addr, next
- * len-4). With no DSP core, channel 0 is drained at the stereo 16-bit
- * 44.1kHz rate; when a buffer runs out the queued next buffer is loaded
- * and the channel's completion interrupt (word 0 bit 16 for channel 0)
- * fires so the audio folio can queue another. */
-static int64_t dsp_dma_acc;
+/* RAM -> DSP input DMA: 13 channels at MADAM 0x400 + 16*ch (addr, len-4,
+ * next addr, next len-4), enabled through CLIO 0x300/0x304, completion on
+ * CLIO word 0 bit 16+ch. With no DSP core, channels are drained at a fixed
+ * rate: channel 0 (streamed stereo audio) at 4 bytes per 44.1kHz frame, the
+ * others (sample playback) at 2. When a buffer runs out the queued next
+ * buffer is loaded, or the channel stops. */
+#define DSP_DMA_CHANNELS 13
+static int64_t dsp_dma_acc[DSP_DMA_CHANNELS];
+static uint32_t dsp_dma_on;
+
 static void dsp_dma_tick(int cycles) {
-    if (!((c.reg[0x300 >> 2] | c.dma_en) & 1)) return;
-    dsp_dma_acc += (int64_t)cycles * 44100 * 4;
-    int64_t bytes = dsp_dma_acc / 12500000;
-    if (!bytes) return;
-    dsp_dma_acc -= bytes * 12500000;
-    int32_t left = (int32_t)madam_reg(0x404) - (int32_t)bytes;
-    madam_set_reg(0x400, madam_reg(0x400) + (uint32_t)bytes);
-    if (left >= -4) { madam_set_reg(0x404, (uint32_t)left); return; }
-    if (dsp_dma_next_pending & 1) {
-        dsp_dma_next_pending &= ~1u;
-        madam_set_reg(0x400, madam_reg(0x408));
-        madam_set_reg(0x404, madam_reg(0x40C));
-    } else {
-        madam_set_reg(0x404, 0xFFFFFFFCu);       /* ran dry: hold */
+    for (int ch = 0; ch < DSP_DMA_CHANNELS; ch++) {
+        if (!(dsp_dma_on & (1u << ch))) continue;
+        uint32_t base = 0x400 + (uint32_t)ch * 16;
+        dsp_dma_acc[ch] += (int64_t)cycles * 44100 * (ch == 0 ? 4 : 2);
+        int64_t bytes = dsp_dma_acc[ch] / 12500000;
+        if (!bytes) continue;
+        dsp_dma_acc[ch] -= bytes * 12500000;
+        int32_t left = (int32_t)madam_reg(base + 4) - (int32_t)bytes;
+        madam_set_reg(base, madam_reg(base) + (uint32_t)bytes);
+        if (left >= -4) { madam_set_reg(base + 4, (uint32_t)left); continue; }
+        if (dsp_dma_next_pending & (1u << ch)) {
+            dsp_dma_next_pending &= ~(1u << ch);
+            madam_set_reg(base, madam_reg(base + 8));
+            madam_set_reg(base + 4, madam_reg(base + 12));
+        } else {
+            madam_set_reg(base + 4, 0xFFFFFFFCu);
+            dsp_dma_on &= ~(1u << ch);
+        }
+        clio_raise(0, 1u << (16 + ch));
     }
-    clio_raise(0, 1u << 16);
 }
 
 void clio_tick(int cycles) {
@@ -126,8 +137,8 @@ uint32_t clio_read(uint32_t off) {
     case 0x30: return 0;                        /* hcnt */
     case 0x34: return c.line | (c.field << 11); /* vcnt + field */
     case 0x3C: c.seed = c.seed * 1103515245u + 12345u; return c.seed;
-    case 0x40: case 0x44: sync_levels(); return c.pend[0];
-    case 0x48: case 0x4C: return c.mask[0];
+    case 0x40: case 0x44: sync_levels(); clio_fiq_pending(); return c.pend[0];
+    case 0x48: case 0x4C: return c.mask[0] | 0x80000000u;
     case 0x60: case 0x64: return c.pend[1];
     case 0x68: case 0x6C: return c.mask[1];
     case 0x200: case 0x204: return (uint32_t)c.timer_ctl;
@@ -135,7 +146,7 @@ uint32_t clio_read(uint32_t off) {
     case 0x220: return c.slack;
     case 0x28: return c.reg[0x28 >> 2];
     case 0x400: case 0x404: return c.expctl | 0x80;   /* expctl: bit 7 = bus ready */
-    case 0x304: case 0x308: return c.dma_en;
+    case 0x300: case 0x304: case 0x308: return c.dma_en | dsp_dma_on;
     case 0x410: return c.dipir_req[0];
     case 0x414: return c.dipir_req[1];
     }
@@ -179,8 +190,12 @@ void clio_write(uint32_t off, uint32_t v) {
     case 0x208: c.timer_ctl |= (uint64_t)v << 32; return;
     case 0x20C: c.timer_ctl &= ~((uint64_t)v << 32); return;
     case 0x220: c.slack = v & 0x7FF; return;
+    case 0x300:                                  /* DSP input DMA enables (set) */
+        dsp_dma_on |= v & ((1u << DSP_DMA_CHANNELS) - 1);
+        return;
     case 0x304:                                  /* DMA enable set */
         c.dma_en |= v;
+        dsp_dma_on |= v & ((1u << DSP_DMA_CHANNELS) - 1);
         if ((v & 0x00100000) && (c.reg[0x400 >> 2] & 0x800)) {   /* XBUS -> RAM */
             uint32_t dest = madam_reg(0x540), cnt = madam_reg(0x544) + 4;
             xbus_dma_from_device(dest, cnt);
@@ -190,7 +205,7 @@ void clio_write(uint32_t off, uint32_t v) {
             c.dma_done_at = arm.cycles + cnt / 4 + 50;          /* completion IRQ shortly after */
         }
         return;
-    case 0x308: c.dma_en &= ~v; return;
+    case 0x308: c.dma_en &= ~v; dsp_dma_on &= ~v; return;
     case 0x17D0:                                 /* CPU -> DSP semaphore */
         /* bring-up HLE: no DSP core yet, so acknowledge at once (bit 18)
          * and echo the value as the DSP's reply */
