@@ -22,6 +22,18 @@ static void write_ppm(const char *p) {
     fclose(f);
 }
 
+/* scripted input: --press NAME@frame[+len] (default hold 10 frames) */
+typedef struct { uint32_t bits; int at, len; } Press;
+static Press presses[64]; static int npress;
+static uint32_t button_bit(const char *n) {
+    static const struct { const char *n; uint32_t b; } t[] = {
+        {"DOWN",0x80000000u},{"UP",0x40000000u},{"RIGHT",0x20000000u},{"LEFT",0x10000000u},
+        {"A",0x08000000u},{"B",0x04000000u},{"C",0x02000000u},{"START",0x01000000u},{"P",0x01000000u},
+        {"X",0x00800000u},{"R",0x00400000u},{"L",0x00200000u} };
+    for (unsigned i = 0; i < sizeof t / sizeof t[0]; i++) if (!strcmp(n, t[i].n)) return t[i].b;
+    return 0;
+}
+
 static long trace_left;
 static void on_branch(uint32_t from, uint32_t to) {
     if (from >= 0x100 && from < 0x130 && to >= 0x100 && to < 0x130) return;
@@ -32,7 +44,7 @@ int main(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: run3do bios.bin [frames] [--disc image.chd|.cue|.iso] [--trace] [--shot file.ppm]\n"); return 1; }
     size_t len; uint8_t *bios = slurp(argv[1], &len);
     if (!bios) { perror(argv[1]); return 1; }
-    int frames = 120; const char *shot = NULL, *disc_path = NULL;
+    int frames = 120, shot_every = 0; const char *shot = NULL, *disc_path = NULL;
     for (int i = 2; i < argc; i++) {
         if (!strcmp(argv[i], "--trace")) { sys.log_unknown = 1; if (!sys.log_cap) sys.log_cap = 400; }
         else if (!strcmp(argv[i], "--tracecap") && i + 1 < argc) sys.log_cap = atoi(argv[++i]);
@@ -43,6 +55,12 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--dmairq") && i + 1 < argc) sys.xbus_dma_irq = 1u << atoi(argv[++i]);
         else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--disc") && i + 1 < argc) disc_path = argv[++i];
+        else if (!strcmp(argv[i], "--press") && i + 1 < argc && npress < 64) {
+            char name[16] = {0}; int at = 0, len = 10;
+            if (sscanf(argv[++i], "%15[A-Z]@%d+%d", name, &at, &len) >= 2)
+                presses[npress++] = (Press){ button_bit(name), at, len };
+        }
+        else if (!strcmp(argv[i], "--shotevery") && i + 1 < argc) shot_every = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--branches") && i + 1 < argc) { trace_left = atol(argv[++i]); arm.trace_hook = on_branch; }
         else frames = atoi(argv[i]);
     }
@@ -57,7 +75,15 @@ int main(int argc, char **argv) {
         fprintf(stderr, "disc: %d track(s), %u sectors\n", disc_track_count(d), disc_total_sectors(d));
         cdrom_insert(d);
     }
-    for (int f = 0; f < frames && !arm.halted; f++) sys_run_frame();
+    for (int f = 0; f < frames && !arm.halted; f++) {
+        pad_buttons[0] = 0;
+        for (int k = 0; k < npress; k++)
+            if (f >= presses[k].at && f < presses[k].at + presses[k].len) pad_buttons[0] |= presses[k].bits;
+        sys_run_frame();
+        if (shot && shot_every && f && f % shot_every == 0) {
+            char p[512]; snprintf(p, sizeof p, "%s.%05d.ppm", shot, f); write_ppm(p);
+        }
+    }
     fprintf(stderr, "frames=%llu cycles=%llu pc=%08x mode=%02x\n",
             (unsigned long long)sys.frame, (unsigned long long)arm.cycles, arm.r[15], arm.mode);
     if (shot) write_ppm(shot);
