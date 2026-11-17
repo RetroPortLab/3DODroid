@@ -16,6 +16,8 @@ static struct {
     uint32_t slack;
     int timer_acc;
     uint32_t seed;
+    uint32_t dma_en, expctl;
+    uint64_t dma_done_at;
 } c;
 
 void clio_reset(void) {
@@ -53,6 +55,10 @@ void clio_set_line(int line) {
  * bit2 cascade from previous timer, bit3 interrupt on underflow (odd timers).
  * The prescaler ("slack") sets how many CPU cycles make one timer tick. */
 void clio_tick(int cycles) {
+    if (c.dma_done_at && arm.cycles >= c.dma_done_at) {
+        c.dma_done_at = 0;
+        clio_raise(0, sys.xbus_dma_irq ? sys.xbus_dma_irq : (1u << 29));
+    }
     c.timer_acc += cycles;
     int per = (int)(c.slack ? c.slack : 0x150) / 4 + 1;   /* approximation, refined during bring-up */
     while (c.timer_acc >= per) {
@@ -92,7 +98,8 @@ uint32_t clio_read(uint32_t off) {
     case 0x208: case 0x20C: return (uint32_t)(c.timer_ctl >> 32);
     case 0x220: return c.slack;
     case 0x28: return c.reg[0x28 >> 2];
-    case 0x400: return c.reg[0x400 >> 2] | 0x80;   /* expctl: XBUS idle/ready */
+    case 0x400: case 0x404: return c.expctl | 0x80;   /* expctl: bit 7 = bus ready */
+    case 0x304: case 0x308: return c.dma_en;
     }
     if (off >= 0x100 && off < 0x180) {
         int t = (off - 0x100) >> 3;
@@ -124,6 +131,20 @@ void clio_write(uint32_t off, uint32_t v) {
     case 0x208: c.timer_ctl |= (uint64_t)v << 32; return;
     case 0x20C: c.timer_ctl &= ~((uint64_t)v << 32); return;
     case 0x220: c.slack = v & 0x7FF; return;
+    case 0x304:                                  /* DMA enable set */
+        c.dma_en |= v;
+        if ((v & 0x00100000) && (c.reg[0x400 >> 2] & 0x800)) {   /* XBUS -> RAM */
+            uint32_t dest = madam_reg(0x540), cnt = madam_reg(0x544) + 4;
+            xbus_dma_from_device(dest, cnt);
+            madam_set_reg(0x540, dest + cnt);
+            madam_set_reg(0x544, 0xFFFFFFFCu);
+            c.dma_en &= ~0x00100000u;
+            c.dma_done_at = arm.cycles + cnt / 4 + 50;          /* completion IRQ shortly after */
+        }
+        return;
+    case 0x308: c.dma_en &= ~v; return;
+    case 0x400: c.reg[0x400 >> 2] = c.expctl |= v; return;
+    case 0x404: c.expctl &= ~v; c.reg[0x400 >> 2] = c.expctl; return;
     case 0x28: return;                       /* write clears status (stored above) */
     }
     if (off >= 0x100 && off < 0x180) {

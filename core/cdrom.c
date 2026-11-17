@@ -15,8 +15,14 @@ typedef struct {
     uint8_t cmd[7]; int cmd_len;
     Reply q[CD_QLEN]; int q_head, q_count, st_pos;
     Reply *building;
+    /* data phase of READ (0x10): sectors streamed through the data FIFO */
+    uint32_t rd_lba, rd_left;           /* next sector, sectors still to buffer */
+    uint8_t sec[2048]; int sec_pos, sec_valid;
+    uint64_t data_ready_at;
+    uint8_t rd_echo;
 } Cd;
 static Cd cd;
+static void load_next_sector(void);
 
 static Reply *head_ready(void) {
     if (!cd.q_count) return NULL;
@@ -28,7 +34,7 @@ static Disc *cur_disc;
 
 /* drive status byte (cdrom.h CDROM_STATUS_*): 0x80 door open, 0x40 disc in,
  * 0x20 spun up, 0x10 error, 0x02 double speed, 0x01 ready */
-static uint8_t cd_status_byte(void) { return cur_disc ? 0x40 | 0x20 | 0x01 : 0x00; }
+static uint8_t cd_status_byte(void) { return cur_disc ? 0x40 | 0x20 | 0x02 | 0x01 : 0x00; }
 
 void cdrom_insert(Disc *d) { cur_disc = d; }
 Disc *cdrom_disc(void) { return cur_disc; }
@@ -37,6 +43,16 @@ static void push(uint8_t b) { Reply *r = cd.building; if (r && r->len < 64) r->b
 
 static void exec_cmd(void) {
     fprintf(stderr, "[cd] cmd %02x %02x %02x %02x %02x %02x %02x\n", cd.cmd[0], cd.cmd[1], cd.cmd[2], cd.cmd[3], cd.cmd[4], cd.cmd[5], cd.cmd[6]);
+    if (cd.cmd[0] == 0x10) {                    /* READ DATA: MSF, count in bytes 5-6 */
+        uint32_t lba = ((uint32_t)cd.cmd[1] * 60 + cd.cmd[2]) * 75 + cd.cmd[3];
+        lba = lba >= 150 ? lba - 150 : 0;
+        uint32_t cnt = ((uint32_t)cd.cmd[4] << 16) | ((uint32_t)cd.cmd[5] << 8) | cd.cmd[6];
+        cd.rd_lba = lba; cd.rd_left = cnt ? cnt : 1; cd.rd_echo = 0x10;
+        cd.data_ready_at = arm.cycles + CD_REPLY_DELAY;     /* seek + first sector */
+        load_next_sector();
+        return;
+    }
+    if (cd.cmd[0] == 0x08) { cd.rd_left = 0; cd.sec_valid = 0; }   /* abort */
     if (cd.q_count == CD_QLEN) { fprintf(stderr, "[cd] reply queue full\n"); return; }
     Reply *r = &cd.q[(cd.q_head + cd.q_count++) % CD_QLEN];
     r->len = 0; r->ready_at = arm.cycles + CD_REPLY_DELAY;
@@ -51,13 +67,86 @@ static void exec_cmd(void) {
         push(0x00); push(0x00);      /* driver size (x4) */
         push(cd_status_byte());
         break;
+    case 0x8B: {                     /* disc info: type, first/last track, lead-out MSF */
+        if (!cur_disc) { push(cd_status_byte()); break; }
+        int n = disc_track_count(cur_disc);
+        uint8_t m, sec, f; lba_to_msf(disc_total_sectors(cur_disc), &m, &sec, &f);
+        push(0x00);                                  /* disc type: CD-ROM / CD-DA */
+        push((uint8_t)disc_track(cur_disc, 0)->number);
+        push((uint8_t)disc_track(cur_disc, n - 1)->number);
+        push(m); push(sec); push(f);
+        push(cd_status_byte());
+        break;
+    }
+    case 0x8C: {                     /* TOC entry for track cmd[2] */
+        const DiscTrack *t = NULL;
+        if (cur_disc) for (int i = 0; i < disc_track_count(cur_disc); i++)
+            if (disc_track(cur_disc, i)->number == cd.cmd[2]) t = disc_track(cur_disc, i);
+        uint8_t m = 0, sec = 0, f = 0;
+        if (t) lba_to_msf(t->start, &m, &sec, &f);
+        push(0x00);
+        push(t ? (t->type == TRK_AUDIO ? 0x10 : 0x14) : 0x00);   /* ADR 1, control: data track */
+        push(t ? (uint8_t)t->number : 0);
+        push(0x00); push(0x00);
+        push(m); push(sec); push(f);
+        push(t ? cd_status_byte() : (uint8_t)(cd_status_byte() | 0x10));
+        break;
+    }
+    case 0x8D: {                     /* session info: valid flag, start of last session (MSF) */
+        /* The BIOS reads the ISO volume descriptor at session start + 16 to
+         * classify the disc; with the flag clear it uses a bogus base. */
+        uint8_t m = 0, sec = 0, f = 0;
+        if (cur_disc) lba_to_msf(disc_track(cur_disc, 0)->start, &m, &sec, &f);
+        push(0x01); push(m); push(sec); push(f); push(0x00); push(0x00);
+        push(cd_status_byte());
+        break;
+    }
+    case 0x85: {                     /* capacity: end of disc MSF, block size */
+        uint8_t m = 0, sec = 0, f = 0;
+        if (cur_disc) lba_to_msf(disc_total_sectors(cur_disc), &m, &sec, &f);
+        push(0x00); push(m); push(sec); push(f); push(0x08); push(0x00);
+        push(cd_status_byte());
+        break;
+    }
+    case 0x80:                       /* data path check: fixed test pattern */
+        push(0xAA); push(0x55);
+        push(cd_status_byte());
+        break;
     default:
         push(cd_status_byte());
         break;
     }
 }
 
-static uint32_t cd_poll(XbusDev *d) { (void)d; return head_ready() ? 0x10 : 0; }
+static int data_avail(void) { return cd.sec_valid && arm.cycles >= cd.data_ready_at; }
+
+static uint32_t cd_poll(XbusDev *d) { (void)d; return (head_ready() ? 0x10 : 0) | (data_avail() ? 0x20 : 0); }
+
+static void load_next_sector(void) {
+    cd.sec_valid = 0; cd.sec_pos = 0;
+    if (!cd.rd_left || !cur_disc) return;
+    disc_read_data(cur_disc, cd.rd_lba, cd.sec);
+    cd.rd_lba++; cd.rd_left--;
+    cd.sec_valid = 1;
+}
+
+/* Status for a READ only arrives once all its data has been taken. */
+static void read_finished(void) {
+    Reply *r = &cd.q[(cd.q_head + cd.q_count++) % CD_QLEN];
+    r->len = 0; r->ready_at = arm.cycles + 2000;
+    cd.building = r;
+    push(cd.rd_echo); push(cd_status_byte());
+}
+
+uint8_t cdrom_data_byte(void) {
+    if (!cd.sec_valid) return 0;
+    uint8_t b = cd.sec[cd.sec_pos++];
+    if (cd.sec_pos >= 2048) {
+        load_next_sector();
+        if (!cd.sec_valid) read_finished();
+    }
+    return b;
+}
 static uint8_t cd_status(XbusDev *d) {
     (void)d;
     Reply *r = head_ready();
@@ -66,11 +155,12 @@ static uint8_t cd_status(XbusDev *d) {
     if (cd.st_pos >= r->len) { cd.st_pos = 0; cd.q_head = (cd.q_head + 1) % CD_QLEN; cd.q_count--; }
     return b;
 }
-static uint8_t cd_data(XbusDev *d) { (void)d; return 0; }
+static uint8_t cd_data(XbusDev *d) { (void)d; return cdrom_data_byte(); }
 static void cd_cmd(XbusDev *d, uint8_t b) {
     (void)d;
     cd.cmd[cd.cmd_len++] = b;
-    if (cd.cmd_len == 7) { exec_cmd(); cd.cmd_len = 0; }
+    int need = cd.cmd[0] == 0x08 ? 1 : 7;      /* abort is a single byte */
+    if (cd.cmd_len == need) { for (int i = need; i < 7; i++) cd.cmd[i] = 0; exec_cmd(); cd.cmd_len = 0; }
 }
 
 void cdrom_init(void) {

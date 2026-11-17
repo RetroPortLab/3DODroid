@@ -38,6 +38,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--tracecap") && i + 1 < argc) sys.log_cap = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--xbus")) xbus_log = 1;
         else if (!strcmp(argv[i], "--irq")) sys.log_irq = 1;
+        else if (!strcmp(argv[i], "--dmairq") && i + 1 < argc) sys.xbus_dma_irq = 1u << atoi(argv[++i]);
         else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--disc") && i + 1 < argc) disc_path = argv[++i];
         else if (!strcmp(argv[i], "--branches") && i + 1 < argc) { trace_left = atol(argv[++i]); arm.trace_hook = on_branch; }

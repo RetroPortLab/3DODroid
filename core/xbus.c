@@ -24,6 +24,8 @@
 XbusDev *xbus_dev[16];
 static uint32_t sel;
 int xbus_log;
+uint32_t xbus_dma_count, xbus_last_dma_dest;
+void (*xbus_dma_hook)(uint32_t dest, uint32_t count);
 
 static XbusDev *cur(void) { return sel == 0x8F ? NULL : xbus_dev[sel & 15]; }
 
@@ -69,4 +71,20 @@ int xbus_irq_pending(void) {
         if (d && dev_irq(d)) return 1;
     }
     return 0;
+}
+
+/* DMA from the selected device's data FIFO into RAM (CLIO 0x304 bit 20). */
+void xbus_dma_from_device(uint32_t dest, uint32_t count) {
+    XbusDev *d = cur();
+    for (uint32_t i = 0; i < count; i++) {
+        uint8_t b = d ? d->data_byte(d) : 0;
+        uint32_t a = dest + i;
+        if (a < RAM_SIZE) {
+            uint32_t w = mem_rd32(a & ~3u), sh = (3 - (a & 3)) * 8;
+            mem_wr32(a & ~3u, (w & ~(0xFFu << sh)) | ((uint32_t)b << sh));
+        }
+    }
+    xbus_dma_count++; xbus_last_dma_dest = dest;
+    if (xbus_dma_hook) xbus_dma_hook(dest, count);
+    if (xbus_log) fprintf(stderr, "[xbus] dma %u bytes -> %08x\n", count, dest);
 }

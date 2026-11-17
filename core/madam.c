@@ -12,6 +12,8 @@ static struct {
 } m;
 
 void madam_reset(void) { memset(&m, 0, sizeof m); }
+uint32_t madam_reg(uint32_t off) { return m.reg[(off >> 2) & 0x1FF]; }
+void madam_set_reg(uint32_t off, uint32_t v) { m.reg[(off >> 2) & 0x1FF] = v; }
 
 uint32_t madam_read(uint32_t off) {
     switch (off) {

@@ -29,6 +29,8 @@ static inline void ram_wr(uint32_t a, uint32_t v) { memcpy(sys.ram + a, &v, 4); 
 
 uint32_t bus_read32(uint32_t a) {
     a &= ~3u;
+    if (a >= sys.watch_lo && a < sys.watch_hi)
+        fprintf(stderr, "[watch] rd %08x = %08x pc=%08x\n", a, a < RAM_SIZE ? ram_rd(a) : 0, arm.cur_pc);
     if (a < RAM_SIZE) {
         if (sys.rom_overlay) return sys.rom_w[(a & (ROM_SIZE - 1)) >> 2];
         return ram_rd(a);

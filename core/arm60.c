@@ -331,6 +331,7 @@ int arm_run(int budget) {
         if (arm.fiq_line && !arm.f) { exception(0x1C, M_FIQ, R[15] + 4, 1); done += 3; }
         else if (arm.irq_line && !arm.i) { exception(0x18, M_IRQ, R[15] + 4, 0); done += 3; }
         uint32_t before = R[15];
+        if (arm.watch_hook && before == arm.watch_pc) arm.watch_hook();
         done += exec_one();
         if (arm.trace_hook && R[15] != before + 4) arm.trace_hook(before, R[15]);
     }

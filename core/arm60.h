@@ -16,7 +16,8 @@ typedef struct {
     int halted;
     int abort_req;                     /* set by the bus to signal a data abort */
     int v4;
-    void (*trace_hook)(uint32_t from, uint32_t to);   /* called on every non-sequential pc */                            /* test-only: ARMv4 extensions */
+    void (*trace_hook)(uint32_t from, uint32_t to);
+    uint32_t watch_pc; void (*watch_hook)(void);      /* debug: called before executing watch_pc */   /* called on every non-sequential pc */                            /* test-only: ARMv4 extensions */
     uint32_t cur_pc;
     uint64_t cycles;
 } Arm60;
