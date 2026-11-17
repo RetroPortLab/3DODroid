@@ -2,6 +2,7 @@
  * Register offsets follow the public Opera hardware notes; anything not yet
  * understood is stored and logged so BIOS bring-up can fill it in. */
 #include "sys3do.h"
+#include "dsp.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,14 +21,12 @@ static struct {
     uint32_t dma_en, expctl;
     uint32_t dipir_req[2];           /* 0x410/0x414: device that raised attention (0x4000|unit) */
     uint64_t dma_done_at;
-    int dsp_acc;
+    int64_t dsp_acc;
 } c;
-
-static void dsp_dma_reset(void);
 
 void clio_reset(void) {
     memset(&c, 0, sizeof c);
-    dsp_dma_reset();
+    dsp_reset();
     c.slack = 0x150;
     c.seed = 0x12345678;
     c.reg[0x28 >> 2] = 0x01;          /* cstatbits: power-on reset */
@@ -63,54 +62,12 @@ void clio_set_line(int line) {
 /* 16 down-counters. Each control nibble: bit0 decrement, bit1 reload,
  * bit2 cascade from previous timer, bit3 interrupt on underflow (odd timers).
  * The prescaler ("slack") sets how many CPU cycles make one timer tick. */
-/* RAM -> DSP input DMA: 13 channels at MADAM 0x400 + 16*ch (addr, len-4,
- * next addr, next len-4), enabled through CLIO 0x300/0x304, completion on
- * CLIO word 0 bit 16+ch. With no DSP core, channels are drained at a fixed
- * rate: channel 0 (streamed stereo audio) at 4 bytes per 44.1kHz frame, the
- * others (sample playback) at 2. When a buffer runs out the queued next
- * buffer is loaded, or the channel stops. */
-#define DSP_DMA_CHANNELS 13
-static int64_t dsp_dma_acc[DSP_DMA_CHANNELS];
-static uint32_t dsp_dma_on;
-
-static void dsp_dma_reset(void) {
-    memset(dsp_dma_acc, 0, sizeof dsp_dma_acc);
-    dsp_dma_on = 0;
-    dsp_dma_next_pending = 0;
-}
-
-static void dsp_dma_tick(int cycles) {
-    for (int ch = 0; ch < DSP_DMA_CHANNELS; ch++) {
-        if (!(dsp_dma_on & (1u << ch))) continue;
-        uint32_t base = 0x400 + (uint32_t)ch * 16;
-        dsp_dma_acc[ch] += (int64_t)cycles * 44100 * (ch == 0 ? 4 : 2);
-        int64_t bytes = dsp_dma_acc[ch] / 12500000;
-        if (!bytes) continue;
-        dsp_dma_acc[ch] -= bytes * 12500000;
-        int32_t left = (int32_t)madam_reg(base + 4) - (int32_t)bytes;
-        madam_set_reg(base, madam_reg(base) + (uint32_t)bytes);
-        if (left >= -4) { madam_set_reg(base + 4, (uint32_t)left); continue; }
-        if (dsp_dma_next_pending & (1u << ch)) {
-            dsp_dma_next_pending &= ~(1u << ch);
-            madam_set_reg(base, madam_reg(base + 8));
-            madam_set_reg(base + 4, madam_reg(base + 12));
-        } else {
-            madam_set_reg(base + 4, 0xFFFFFFFCu);
-            dsp_dma_on &= ~(1u << ch);
-        }
-        clio_raise(0, 1u << (16 + ch));
-    }
-}
+uint32_t clio_dma_enables(void) { return c.dma_en; }
 
 void clio_tick(int cycles) {
-    dsp_dma_tick(cycles);
-    /* bring-up HLE of the DSP's periodic interrupt (word 0 bit 11): the
-     * audio folio's clock. 44100 Hz / 184 samples per tick at 12.5MHz CPU. */
-    if (sys.dsp_tick_hle) {
-        c.dsp_acc += cycles;
-        const int per = 12500000 / (44100 / 184);
-        while (c.dsp_acc >= per) { c.dsp_acc -= per; clio_raise(0, 1u << 11); }
-    }
+    /* one DSP program pass per 44.1 kHz sample frame */
+    c.dsp_acc += (int64_t)cycles * 44100;
+    while (c.dsp_acc >= 12500000) { c.dsp_acc -= 12500000; dsp_sample(); }
     if (c.dma_done_at && arm.cycles >= c.dma_done_at) {
         c.dma_done_at = 0;
         clio_raise(0, sys.xbus_dma_irq ? sys.xbus_dma_irq : (1u << 29));
@@ -155,7 +112,7 @@ uint32_t clio_read(uint32_t off) {
     case 0x220: return c.slack;
     case 0x28: return c.reg[0x28 >> 2];
     case 0x400: case 0x404: return c.expctl | 0x80;   /* expctl: bit 7 = bus ready */
-    case 0x300: case 0x304: case 0x308: return c.dma_en | dsp_dma_on;
+    case 0x300: case 0x304: case 0x308: return c.dma_en;
     case 0x410: return c.dipir_req[0];
     case 0x414: return c.dipir_req[1];
     }
@@ -163,8 +120,7 @@ uint32_t clio_read(uint32_t off) {
         int t = (off - 0x100) >> 3;
         return (off & 4) ? c.timer_bak[t] : c.timer_cnt[t];
     }
-    if (off == 0x3FB8 && sys.dsp_tick_hle)       /* HLE: audio kernel's 44.1kHz frame counter */
-        return (uint32_t)((arm.cycles * 44100ull / 12500000ull) & 0xFFFF);
+    { uint32_t dv; if (dsp_clio_read(off, &dv)) return dv; }
     if (sys.log_dsp && off >= 0x1700 && off < 0x4000)
         fprintf(stderr, "[dsp] rd %04x = %08x pc=%08x f%llu\n", off, c.reg[(off >> 2) & 0x3FFF], arm.cur_pc, (unsigned long long)sys.frame);
     return c.reg[(off >> 2) & 0x3FFF];
@@ -174,6 +130,7 @@ void clio_write(uint32_t off, uint32_t v) {
     if (sys.log_dsp && off >= 0x1700 && off < 0x4000 && !(off >= 0x1800 && off < 0x2000))
         fprintf(stderr, "[dsp] wr %04x = %08x pc=%08x f%llu\n", off, v, arm.cur_pc, (unsigned long long)sys.frame);
     if (off >= 0x500 && off < 0x600) { xbus_write(off & ~0x3Fu, v); return; }
+    if (dsp_clio_write(off, v)) return;
     c.reg[(off >> 2) & 0x3FFF] = v;
     switch (off) {
     case 0x08: c.vint0 = v; return;
@@ -199,12 +156,12 @@ void clio_write(uint32_t off, uint32_t v) {
     case 0x208: c.timer_ctl |= (uint64_t)v << 32; return;
     case 0x20C: c.timer_ctl &= ~((uint64_t)v << 32); return;
     case 0x220: c.slack = v & 0x7FF; return;
-    case 0x300:                                  /* DSP input DMA enables (set) */
-        dsp_dma_on |= v & ((1u << DSP_DMA_CHANNELS) - 1);
+    case 0x300:                                  /* stop and clear DMA channels */
+        c.dma_en &= ~v;
+        dsp_fifo_stop(v);
         return;
     case 0x304:                                  /* DMA enable set */
         c.dma_en |= v;
-        dsp_dma_on |= v & ((1u << DSP_DMA_CHANNELS) - 1);
         if ((v & 0x00100000) && (c.reg[0x400 >> 2] & 0x800)) {   /* XBUS -> RAM */
             uint32_t dest = madam_reg(0x540), cnt = madam_reg(0x544) + 4;
             xbus_dma_from_device(dest, cnt);
@@ -214,12 +171,7 @@ void clio_write(uint32_t off, uint32_t v) {
             c.dma_done_at = arm.cycles + cnt / 4 + 50;          /* completion IRQ shortly after */
         }
         return;
-    case 0x308: c.dma_en &= ~v; dsp_dma_on &= ~v; return;
-    case 0x17D0:                                 /* CPU -> DSP semaphore */
-        /* bring-up HLE: no DSP core yet, so acknowledge at once (bit 18)
-         * and echo the value as the DSP's reply */
-        c.reg[0x17D0 >> 2] = 0x40000u | (v & 0xFFFF);
-        return;
+    case 0x308: c.dma_en &= ~v; return;
     case 0x410: c.dipir_req[0] = 0; return;
     case 0x414: c.dipir_req[1] = 0; return;
     case 0x400: c.reg[0x400 >> 2] = c.expctl |= v; return;

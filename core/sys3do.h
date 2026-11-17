@@ -14,7 +14,7 @@ typedef struct {
     uint8_t  nvram[NVRAM_SIZE];
     int nvram_dirty;
     int rom_overlay;
-    int log_unknown, unk_logged, log_irq, log_cap, log_dsp, dsp_tick_hle;
+    int log_unknown, unk_logged, log_irq, log_cap, log_dsp;
     uint32_t irq_watch;
     uint32_t xbus_dma_irq;
     int pbus_irq_word; uint32_t pbus_irq_bit;   /* bring-up: player bus DMA done */
@@ -62,4 +62,4 @@ void video_scanline(int line);
 void video_render_frame(void);
 extern uint32_t pad_buttons[2];
 extern int pad_count;
-extern uint32_t dsp_dma_next_pending;
+uint32_t clio_dma_enables(void);

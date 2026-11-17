@@ -2,6 +2,7 @@
  * Bring-up skeleton: registers are shadowed and logged; the cel engine and
  * display list walker are filled in as the BIOS exercises them. */
 #include "sys3do.h"
+#include "dsp.h"
 #include <string.h>
 #include <stdio.h>
 #include "cel.h"
@@ -20,6 +21,7 @@ uint32_t madam_read(uint32_t off) {
     case 0x000: return 0x01020000;  /* MADAM revision (production Opera) */
     case 0x004: return 0x00000029;  /* msysbits: 2MB DRAM + 1MB VRAM config */
     }
+    if (off >= 0x400 && off < 0x540) return dsp_fifo_read(off);
     if (off < 0x800) return m.reg[off >> 2];
     if (sys.log_unknown && sys.unk_logged < sys.log_cap) {
         sys.unk_logged++;
@@ -29,7 +31,6 @@ uint32_t madam_read(uint32_t off) {
 }
 
 uint32_t madam_shown_fb;
-uint32_t dsp_dma_next_pending;      /* per RAM->DSP channel: next addr/len written */
 void madam_fallback_frame(void);
 
 /* Control port: daisy-chained pods shift their data in each field. A
@@ -60,10 +61,7 @@ static void pbus_transfer(uint32_t in_addr, uint32_t out_addr, uint32_t len) {
 void madam_write(uint32_t off, uint32_t v) {
     if (off < 0x800) m.reg[off >> 2] = v;
     if (off == 0x580) { m.vdl_addr = v; if (sys.log_unknown) fprintf(stderr, "[madam] VDL head = %08x\n", v); return; }
-    if (off >= 0x400 && off < 0x4D0 && ((off & 0xF) == 0xC)) {   /* next length: next buffer queued */
-        dsp_dma_next_pending |= 1u << ((off - 0x400) >> 4);
-        return;
-    }
+    if (off >= 0x400 && off < 0x540) { dsp_fifo_write(off, v); return; }   /* DSP DMA channels */
     switch (off) {
     case 0x008:                                   /* MCTL */
         if (v & 0x8000) {                         /* player bus (control port) DMA */

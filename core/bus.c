@@ -126,7 +126,6 @@ void sport_write(uint32_t off, uint32_t mask) {
 void sys_init(void) {
     memset(&sys.ram[0], 0, RAM_SIZE);
     sys.rom_overlay = 1;
-    sys.dsp_tick_hle = 1;               /* no DSP core yet: emulate the audio clock */
     madam_reset();
     clio_reset();
     cdrom_init();

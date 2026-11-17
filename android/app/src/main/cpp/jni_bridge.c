@@ -3,6 +3,7 @@
 #include <jni.h>
 #include <android/log.h>
 #include <android/native_window_jni.h>
+#include <aaudio/AAudio.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -14,6 +15,7 @@
 #include "sys3do.h"
 #include "xbus.h"
 #include "disc.h"
+#include "dsp.h"
 
 #define TAG "3DODroid"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -27,6 +29,52 @@ static volatile float fps;
 static Disc *disc;
 static char last_error[256];
 static char nvram_path[1024];
+
+/* ------------------------------------------------------------ audio -- */
+#define AUDIO_TARGET 3072        /* frames buffered between emulation and output (~70 ms) */
+static AAudioStream *stream;
+static volatile int sound_on = 1;
+
+static aaudio_data_callback_result_t audio_cb(AAudioStream *s, void *user, void *data, int32_t frames) {
+    (void)s; (void)user;
+    int16_t *out = (int16_t *)data;
+    int got = (sound_on && running && !paused) ? dsp_audio_take(out, frames) : 0;
+    if (got < frames) memset(out + got * 2, 0, (size_t)(frames - got) * 4);
+    return AAUDIO_CALLBACK_RESULT_CONTINUE;
+}
+
+static void audio_error_cb(AAudioStream *s, void *user, aaudio_result_t err);
+
+static void audio_open(void) {
+    AAudioStreamBuilder *b;
+    if (stream || AAudio_createStreamBuilder(&b) != AAUDIO_OK) return;
+    AAudioStreamBuilder_setFormat(b, AAUDIO_FORMAT_PCM_I16);
+    AAudioStreamBuilder_setChannelCount(b, 2);
+    AAudioStreamBuilder_setSampleRate(b, 44100);
+    AAudioStreamBuilder_setPerformanceMode(b, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
+    AAudioStreamBuilder_setDataCallback(b, audio_cb, NULL);
+    AAudioStreamBuilder_setErrorCallback(b, audio_error_cb, NULL);
+    if (AAudioStreamBuilder_openStream(b, &stream) == AAUDIO_OK) {
+        LOGI("audio: %d Hz, burst %d", AAudioStream_getSampleRate(stream), AAudioStream_getFramesPerBurst(stream));
+        AAudioStream_requestStart(stream);
+    } else stream = NULL;
+    AAudioStreamBuilder_delete(b);
+}
+
+static void audio_close(void) {
+    if (!stream) return;
+    AAudioStream_requestStop(stream);
+    AAudioStream_close(stream);
+    stream = NULL;
+}
+
+/* Headphones plugged in or out: the stream is disconnected and must be
+ * reopened, but not from the callback's own thread. */
+static void *audio_reopen(void *arg) { (void)arg; audio_close(); if (running) audio_open(); return NULL; }
+static void audio_error_cb(AAudioStream *s, void *user, aaudio_result_t err) {
+    (void)s; (void)user;
+    if (err == AAUDIO_ERROR_DISCONNECTED) { pthread_t t; pthread_create(&t, NULL, audio_reopen, NULL); pthread_detach(t); }
+}
 
 /* CUE sheets opened through Android's storage framework: track file names
  * mapped to /proc/self/fd paths of descriptors the Java side keeps open. */
@@ -114,7 +162,18 @@ static void *run(void *arg) {
         fps_frames++;
         int64_t t = now_ns();
         if (t - fps_t0 >= 1000000000LL) { fps = fps_frames * 1e9f / (float)(t - fps_t0); fps_t0 = t; fps_frames = 0; }
-        next += frame_ns;
+        /* Keep the audio buffer near its target by running the emulation
+         * up to 1% fast or slow, so sound neither runs dry nor lags. */
+        int64_t step = frame_ns;
+        if (stream && sound_on) {
+            int fill = dsp_audio_available();
+            if (fill > AUDIO_TARGET + 1024) step = frame_ns * 101 / 100;
+            else if (fill < AUDIO_TARGET - 1024) step = frame_ns * 99 / 100;
+        } else {
+            int16_t junk[1024];
+            while (dsp_audio_take(junk, 512) > 0) {}             /* sound off: discard */
+        }
+        next += step;
         if (next > t) {
             struct timespec ts = { (time_t)(next / 1000000000LL), (long)(next % 1000000000LL) };
             clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
@@ -130,6 +189,7 @@ static void stop_thread(void) {
     if (!running) return;
     running = 0;
     pthread_join(thread, NULL);
+    audio_close();
 }
 
 #define FN(name) Java_com_retroportlab_threedodroid_NativeLib_##name
@@ -207,6 +267,8 @@ JNIEXPORT void JNICALL FN(start)(JNIEnv *env, jclass c) {
     if (running) return;
     paused = 0;
     running = 1;
+    { int16_t junk[1024]; while (dsp_audio_take(junk, 512) > 0) {} }
+    audio_open();
     pthread_create(&thread, NULL, run, NULL);
 }
 
@@ -220,3 +282,4 @@ JNIEXPORT void JNICALL FN(reset)(JNIEnv *env, jclass c) { (void)env; (void)c; re
 JNIEXPORT void JNICALL FN(setPaused)(JNIEnv *env, jclass c, jboolean p) { (void)env; (void)c; paused = p; }
 JNIEXPORT void JNICALL FN(setButtons)(JNIEnv *env, jclass c, jint mask) { (void)env; (void)c; buttons = (uint32_t)mask; }
 JNIEXPORT jfloat JNICALL FN(getFps)(JNIEnv *env, jclass c) { (void)env; (void)c; return fps; }
+JNIEXPORT void JNICALL FN(setSound)(JNIEnv *env, jclass c, jboolean on) { (void)env; (void)c; sound_on = on; }

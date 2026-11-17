@@ -4,6 +4,7 @@
 #include "../core/sys3do.h"
 #include "../core/xbus.h"
 #include "../core/disc.h"
+#include "../core/dsp.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,14 +45,16 @@ int main(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: run3do bios.bin [frames] [--disc image.chd|.cue|.iso] [--trace] [--shot file.ppm]\n"); return 1; }
     size_t len; uint8_t *bios = slurp(argv[1], &len);
     if (!bios) { perror(argv[1]); return 1; }
-    int frames = 120, shot_every = 0; const char *shot = NULL, *disc_path = NULL;
+    int frames = 120, shot_every = 0; const char *shot = NULL, *disc_path = NULL, *wav_path = NULL;
+    FILE *wav = NULL; uint32_t wav_frames = 0;
     for (int i = 2; i < argc; i++) {
         if (!strcmp(argv[i], "--trace")) { sys.log_unknown = 1; if (!sys.log_cap) sys.log_cap = 400; }
         else if (!strcmp(argv[i], "--tracecap") && i + 1 < argc) sys.log_cap = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--xbus")) xbus_log = 1;
         else if (!strcmp(argv[i], "--irq")) sys.log_irq = 1;
         else if (!strcmp(argv[i], "--dsp")) sys.log_dsp = 1;
-        else if (!strcmp(argv[i], "--dsptick")) sys.dsp_tick_hle = 1;
+        else if (!strcmp(argv[i], "--dsplog") && i + 1 < argc) dsp_log = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--wav") && i + 1 < argc) wav_path = argv[++i];
         else if (!strcmp(argv[i], "--dmairq") && i + 1 < argc) sys.xbus_dma_irq = 1u << atoi(argv[++i]);
         else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--disc") && i + 1 < argc) disc_path = argv[++i];
@@ -80,6 +83,9 @@ int main(int argc, char **argv) {
         for (int k = 0; k < npress; k++)
             if (f >= presses[k].at && f < presses[k].at + presses[k].len) pad_buttons[0] |= presses[k].bits;
         sys_run_frame();
+        if (wav_path && !wav) { wav = fopen(wav_path, "wb"); if (wav) fseek(wav, 44, SEEK_SET); }
+        { int16_t buf[4096 * 2]; int n;
+          while ((n = dsp_audio_take(buf, 4096)) > 0) if (wav) { fwrite(buf, 4, n, wav); wav_frames += n; } }
         if (shot && shot_every && f && f % shot_every == 0) {
             char p[512]; snprintf(p, sizeof p, "%s.%05d.ppm", shot, f); write_ppm(p);
         }
@@ -87,5 +93,16 @@ int main(int argc, char **argv) {
     fprintf(stderr, "frames=%llu cycles=%llu pc=%08x mode=%02x\n",
             (unsigned long long)sys.frame, (unsigned long long)arm.cycles, arm.r[15], arm.mode);
     if (shot) write_ppm(shot);
+    if (wav) {
+        uint32_t data = wav_frames * 4, riff = 36 + data, sr = 44100, br = 44100 * 4, fmt = 16;
+        uint16_t pcm = 1, ch = 2, al = 4, bits = 16;
+        fseek(wav, 0, SEEK_SET);
+        fwrite("RIFF", 1, 4, wav); fwrite(&riff, 4, 1, wav); fwrite("WAVEfmt ", 1, 8, wav);
+        fwrite(&fmt, 4, 1, wav); fwrite(&pcm, 2, 1, wav); fwrite(&ch, 2, 1, wav); fwrite(&sr, 4, 1, wav);
+        fwrite(&br, 4, 1, wav); fwrite(&al, 2, 1, wav); fwrite(&bits, 2, 1, wav);
+        fwrite("data", 1, 4, wav); fwrite(&data, 4, 1, wav);
+        fclose(wav);
+        fprintf(stderr, "wav: %u frames (%.1f s)\n", wav_frames, wav_frames / 44100.0);
+    }
     return 0;
 }

@@ -348,7 +348,14 @@ public class MainActivity extends Activity {
                 haveBios() ? "Loaded" : "Not set", v -> pick(PICK_BIOS));
         list.addView(bios);
         list.addView(row("Games folder", folderLabel(), "Change", v -> pick(PICK_FOLDER)));
-        list.addView(sectionTitle("Display"));
+        list.addView(sectionTitle("Sound and display"));
+        LinearLayout snd = row("Sound", null, prefs.getBoolean("sound", true) ? "On" : "Off", null);
+        snd.setOnClickListener(v -> {
+            boolean on = !prefs.getBoolean("sound", true);
+            prefs.edit().putBoolean("sound", on).apply();
+            setRowValue(snd, on ? "On" : "Off");
+        });
+        list.addView(snd);
         LinearLayout fps = row("Show frame rate", null, prefs.getBoolean("showFps", false) ? "On" : "Off", null);
         fps.setOnClickListener(v -> {
             boolean on = !prefs.getBoolean("showFps", false);
@@ -665,6 +672,7 @@ public class MainActivity extends Activity {
             root.addView(fpsView, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START));
             ui.postDelayed(fpsTick, 500);
         }
+        NativeLib.setSound(prefs.getBoolean("sound", true));
         NativeLib.start();
     }
 

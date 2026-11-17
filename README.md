@@ -14,10 +14,10 @@ Select = X (stop), L1/L2 = L, R1/R2 = R, d-pad or left stick to move.
 Select + Start (or Back) opens the in-game menu.
 
 **Status:** experimental. Star Fighter runs from its intro into 3D gameplay.
-There's no sound yet (the DSP isn't emulated).
+Sound is emulated through the 3DO's own audio DSP.
 
 ## Layout
-- `core/` – shared C core: ARM60 CPU, bus/memory map, MADAM, CLIO (more chips to come)
+- `core/` – shared C core: ARM60 CPU, bus/memory map, MADAM (cel engine, video), CLIO, audio DSP, CD drive
 - `desktop/run3do` – headless test runner: `run3do bios.bin [frames] [--trace] [--shot out.ppm]`
 - `tools/cputest` – CPU self-test (compares an ARM-compiled program's hash against a native run)
 - `tools/disctest` – disc backend self-test
@@ -39,3 +39,9 @@ licence, vendored in `third_party/libchdr`).
 Needs the Android SDK, NDK 27 and CMake 3.22. The release key is read from
 `android/keystore.properties` (not in the repo); without it the build falls back
 to the debug key.
+
+## Credits
+The audio DSP's instruction set and register behaviour are based on what the
+FreeDO project (www.freedo.org — Alexander Troosh, Maxim Grishin, Allen Wright,
+John Sammons, Felix Lazarev) published about the 3DO's DSPP. 3DODroid's DSP is
+its own implementation; this credit is given as FreeDO's notes ask.
