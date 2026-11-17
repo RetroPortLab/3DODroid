@@ -109,9 +109,11 @@ void clio_write(uint32_t off, uint32_t v) {
     case 0x0C: c.vint1 = v; return;
     case 0x40: clio_raise(0, v); return;
     case 0x44: c.pend[0] &= ~v; return;
-    case 0x48: if (sys.irq_watch && (v & sys.irq_watch)) sys_backtrace("mask0 set");
+    case 0x48:
+        if (sys.irq_watch && (v & sys.irq_watch)) sys_backtrace("mask0 set");
         if (sys.log_irq) fprintf(stderr, "[irq] mask0 |= %08x pc=%08x\n", v, arm.cur_pc); c.mask[0] |= v; return;
-    case 0x4C: if (sys.irq_watch && (v & sys.irq_watch)) sys_backtrace("mask0 clear");
+    case 0x4C:
+        if (sys.irq_watch && (v & sys.irq_watch)) sys_backtrace("mask0 clear");
         if (sys.log_irq) fprintf(stderr, "[irq] mask0 &= ~%08x pc=%08x\n", v, arm.cur_pc); c.mask[0] &= ~v; return;
     case 0x60: clio_raise(1, v); return;
     case 0x64: c.pend[1] &= ~v; if (!(c.pend[1] & c.mask[1])) c.pend[0] &= ~0x80000000u; return;

@@ -14,3 +14,7 @@ uint32_t xbus_read(uint32_t off);
 void xbus_write(uint32_t off, uint32_t v);
 int xbus_irq_pending(void);
 void cdrom_init(void);
+
+struct Disc;
+void cdrom_insert(struct Disc *d);
+struct Disc *cdrom_disc(void);

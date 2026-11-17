@@ -1,8 +1,9 @@
 /* 3DODroid desktop runner (headless), the equivalent of JagDroid's jagrun.
- *   run3do <bios.bin> [frames] [--trace] [--shot out.ppm]
+ *   run3do <bios.bin> [frames] [--disc image] [--trace] [--shot out.ppm]
  */
 #include "../core/sys3do.h"
 #include "../core/xbus.h"
+#include "../core/disc.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,16 +29,17 @@ static void on_branch(uint32_t from, uint32_t to) {
 }
 
 int main(int argc, char **argv) {
-    if (argc < 2) { fprintf(stderr, "usage: run3do bios.bin [frames] [--trace] [--shot file.ppm]\n"); return 1; }
+    if (argc < 2) { fprintf(stderr, "usage: run3do bios.bin [frames] [--disc image.chd|.cue|.iso] [--trace] [--shot file.ppm]\n"); return 1; }
     size_t len; uint8_t *bios = slurp(argv[1], &len);
     if (!bios) { perror(argv[1]); return 1; }
-    int frames = 120; const char *shot = NULL;
+    int frames = 120; const char *shot = NULL, *disc_path = NULL;
     for (int i = 2; i < argc; i++) {
         if (!strcmp(argv[i], "--trace")) { sys.log_unknown = 1; if (!sys.log_cap) sys.log_cap = 400; }
         else if (!strcmp(argv[i], "--tracecap") && i + 1 < argc) sys.log_cap = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--xbus")) xbus_log = 1;
         else if (!strcmp(argv[i], "--irq")) sys.log_irq = 1;
         else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
+        else if (!strcmp(argv[i], "--disc") && i + 1 < argc) disc_path = argv[++i];
         else if (!strcmp(argv[i], "--branches") && i + 1 < argc) { trace_left = atol(argv[++i]); arm.trace_hook = on_branch; }
         else frames = atoi(argv[i]);
     }
@@ -45,6 +47,12 @@ int main(int argc, char **argv) {
     sys_init();
     arm.trace_hook = hook;
     if (sys_load_bios(bios, len)) { fprintf(stderr, "BIOS must be 1MB (got %zu bytes)\n", len); return 1; }
+    if (disc_path) {
+        char err[256]; Disc *d = disc_open(disc_path, err, sizeof err);
+        if (!d) { fprintf(stderr, "disc: %s\n", err); return 1; }
+        fprintf(stderr, "disc: %d track(s), %u sectors\n", disc_track_count(d), disc_total_sectors(d));
+        cdrom_insert(d);
+    }
     for (int f = 0; f < frames && !arm.halted; f++) sys_run_frame();
     fprintf(stderr, "frames=%llu cycles=%llu pc=%08x mode=%02x\n",
             (unsigned long long)sys.frame, (unsigned long long)arm.cycles, arm.r[15], arm.mode);

@@ -1,6 +1,7 @@
 /* 3DODroid - CD-ROM drive on the XBUS (bring-up: logs commands) */
 #include "sys3do.h"
 #include "xbus.h"
+#include "disc.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -23,8 +24,14 @@ static Reply *head_ready(void) {
     return arm.cycles >= r->ready_at ? r : NULL;
 }
 
-/* drive status: door closed, disc present, spun up, ready */
-static uint8_t cd_status_byte(void) { return 0x00; }
+static Disc *cur_disc;
+
+/* drive status byte (cdrom.h CDROM_STATUS_*): 0x80 door open, 0x40 disc in,
+ * 0x20 spun up, 0x10 error, 0x02 double speed, 0x01 ready */
+static uint8_t cd_status_byte(void) { return cur_disc ? 0x40 | 0x20 | 0x01 : 0x00; }
+
+void cdrom_insert(Disc *d) { cur_disc = d; }
+Disc *cdrom_disc(void) { return cur_disc; }
 
 static void push(uint8_t b) { Reply *r = cd.building; if (r && r->len < 64) r->b[r->len++] = b; }
 
