@@ -47,6 +47,7 @@ int main(int argc, char **argv) {
     void (*hook)(uint32_t, uint32_t) = arm.trace_hook;
     sys_init();
     arm.trace_hook = hook;
+    arm.log_undef = 5;
     if (sys_load_bios(bios, len)) { fprintf(stderr, "BIOS must be 1MB (got %zu bytes)\n", len); return 1; }
     if (disc_path) {
         char err[256]; Disc *d = disc_open(disc_path, err, sizeof err);

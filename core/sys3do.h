@@ -53,6 +53,7 @@ void clio_set_line(int line);
 void clio_tick(int cycles);
 int  clio_fiq_pending(void);
 void clio_raise(int word, uint32_t bits);
+void clio_dipir_request(int unit);
 
 uint32_t sport_read(uint32_t off);
 void sport_write(uint32_t off, uint32_t mask);

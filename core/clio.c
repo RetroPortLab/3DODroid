@@ -4,6 +4,7 @@
 #include "sys3do.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "xbus.h"
 
 static struct {
@@ -17,6 +18,7 @@ static struct {
     int timer_acc;
     uint32_t seed;
     uint32_t dma_en, expctl;
+    uint32_t dipir_req[2];           /* 0x410/0x414: device that raised attention (0x4000|unit) */
     uint64_t dma_done_at;
 } c;
 
@@ -100,6 +102,8 @@ uint32_t clio_read(uint32_t off) {
     case 0x28: return c.reg[0x28 >> 2];
     case 0x400: case 0x404: return c.expctl | 0x80;   /* expctl: bit 7 = bus ready */
     case 0x304: case 0x308: return c.dma_en;
+    case 0x410: return c.dipir_req[0];
+    case 0x414: return c.dipir_req[1];
     }
     if (off >= 0x100 && off < 0x180) {
         int t = (off - 0x100) >> 3;
@@ -118,10 +122,14 @@ void clio_write(uint32_t off, uint32_t v) {
     case 0x44: c.pend[0] &= ~v; return;
     case 0x48:
         if (sys.irq_watch && (v & sys.irq_watch)) sys_backtrace("mask0 set");
-        if (sys.log_irq) fprintf(stderr, "[irq] mask0 |= %08x pc=%08x\n", v, arm.cur_pc); c.mask[0] |= v; return;
+        if (sys.log_irq) fprintf(stderr, "[irq] mask0 |= %08x pc=%08x\n", v, arm.cur_pc);
+        c.mask[0] |= v;
+        return;
     case 0x4C:
         if (sys.irq_watch && (v & sys.irq_watch)) sys_backtrace("mask0 clear");
-        if (sys.log_irq) fprintf(stderr, "[irq] mask0 &= ~%08x pc=%08x\n", v, arm.cur_pc); c.mask[0] &= ~v; return;
+        if (sys.log_irq) fprintf(stderr, "[irq] mask0 &= ~%08x pc=%08x\n", v, arm.cur_pc);
+        c.mask[0] &= ~v;
+        return;
     case 0x60: clio_raise(1, v); return;
     case 0x64: c.pend[1] &= ~v; if (!(c.pend[1] & c.mask[1])) c.pend[0] &= ~0x80000000u; return;
     case 0x68: if (sys.log_irq) fprintf(stderr, "[irq] mask1 |= %08x pc=%08x\n", v, arm.cur_pc); c.mask[1] |= v; return;
@@ -143,9 +151,27 @@ void clio_write(uint32_t off, uint32_t v) {
         }
         return;
     case 0x308: c.dma_en &= ~v; return;
+    case 0x410: c.dipir_req[0] = 0; return;
+    case 0x414: c.dipir_req[1] = 0; return;
     case 0x400: c.reg[0x400 >> 2] = c.expctl |= v; return;
     case 0x404: c.expctl &= ~v; c.reg[0x400 >> 2] = c.expctl; return;
-    case 0x28: return;                       /* write clears status (stored above) */
+    case 0x28:
+        /* Writing 0x30 here (after acknowledging a device's attention) makes
+         * the hardware re-enter the ROM with status 0x40: the ROM runs the
+         * dipir for the device latched in 0x410/0x414, then returns to the
+         * caller with subs pc, lr, #8. Interrupts stay off meanwhile. */
+        if (v & 0x30) {
+            if (sys.log_irq) fprintf(stderr, "[clio] dipir trap from pc=%08x\n", arm.cur_pc);
+            c.reg[0x28 >> 2] = 0x40;
+            sys.rom_overlay = 1;
+            arm.r[14] = arm.cur_pc + 4 + 8;               /* ROM returns with subs pc, lr, #8 */
+            arm.r[15] = 0;
+            arm.i = 1; arm.f = 1;                        /* dipir runs with interrupts off */
+            arm.trap_taken = 1;
+            return;
+        }
+        c.reg[0x28 >> 2] = 0;
+        return;
     }
     if (off >= 0x100 && off < 0x180) {
         int t = (off - 0x100) >> 3;
@@ -156,4 +182,11 @@ void clio_write(uint32_t off, uint32_t v) {
         sys.unk_logged++;
         fprintf(stderr, "[clio] wr %03x = %08x pc=%08x\n", off, v, arm.cur_pc);
     }
+}
+
+/* An XBUS device raising attention (e.g. disc inserted) latches its unit
+ * number for the ROM dipir, which reads it from 0x410/0x414. */
+void clio_dipir_request(int unit) {
+    if (!(c.dipir_req[0] & 0x4000)) c.dipir_req[0] = 0x4000u | (uint32_t)unit;
+    else if (!(c.dipir_req[1] & 0x4000)) c.dipir_req[1] = 0x4000u | (uint32_t)unit;
 }

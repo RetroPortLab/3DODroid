@@ -59,7 +59,10 @@ void xbus_write(uint32_t off, uint32_t v) {
     logx("wr", off, v);
     switch (off) {
     case 0x500: sel = v & 0xFF; break;
-    case 0x540: if (d) d->poll_en = v & 0x0F; break;   /* writes to 0x8F ignored */
+    case 0x540:
+        if (d) d->poll_en = v & 0x0F;
+        if (d && (v & 0x80) && d == xbus_dev[0]) cdrom_ack_attention();
+        break;
     case 0x580: if (d) d->cmd_byte(d, (uint8_t)v); break;
     }
     arm.fiq_line = clio_fiq_pending();

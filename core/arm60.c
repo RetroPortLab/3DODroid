@@ -48,6 +48,8 @@ void arm_set_cpsr(uint32_t v) {
 }
 
 static void exception(uint32_t vec, uint32_t mode, uint32_t ret, int disable_fiq) {
+    if (vec == 0x04 && arm.log_undef && arm.log_undef-- > 0)
+        fprintf(stderr, "[arm] undefined instruction %08x at %08x (mode %02x)\n", bus_read32(arm.cur_pc), arm.cur_pc, arm.mode);
     uint32_t old = arm_cpsr();
     switch_mode(mode);
     arm.spsr = old;
@@ -194,6 +196,7 @@ static int exec_sdt(uint32_t ins, uint32_t pc) {
     }
     uint32_t v = rd == 15 ? pc + 12 : R[rd];
     if (b) bus_write8(addr, (uint8_t)v); else bus_write32(addr & ~3u, v);
+    if (arm.trap_taken) { arm.trap_taken = 0; return 3; }
     if (arm.abort_req) { arm.abort_req = 0; exception(0x10, M_ABT, pc + 8, 0); return 4; }
     if (!p || w) R[rn] = nb;
     return 2;

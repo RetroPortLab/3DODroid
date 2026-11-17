@@ -14,7 +14,9 @@ typedef struct {
     uint32_t bank_r13[6], bank_r14[6], bank_spsr[6];   /* idx: usr,svc,abt,und,irq,fiq */
     int irq_line, fiq_line;
     int halted;
-    int abort_req;                     /* set by the bus to signal a data abort */
+    int abort_req;
+    int trap_taken;
+    int log_undef;                     /* debug: log this many undefined-instruction traps */                    /* bus redirected pc (don't advance) */                     /* set by the bus to signal a data abort */
     int v4;
     void (*trace_hook)(uint32_t from, uint32_t to);
     uint32_t watch_pc; void (*watch_hook)(void);      /* debug: called before executing watch_pc */   /* called on every non-sequential pc */                            /* test-only: ARMv4 extensions */

@@ -4,6 +4,7 @@
 #include "disc.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 /* Replies are queued and only become visible after a delay, like a real
  * drive: the BIOS sends the next command before the previous status is due. */
@@ -22,6 +23,7 @@ typedef struct {
     uint8_t rd_echo;
 } Cd;
 static Cd cd;
+static int attention;
 static void load_next_sector(void);
 
 static Reply *head_ready(void) {
@@ -32,11 +34,17 @@ static Reply *head_ready(void) {
 
 static Disc *cur_disc;
 
-/* drive status byte (cdrom.h CDROM_STATUS_*): 0x80 door open, 0x40 disc in,
- * 0x20 spun up, 0x10 error, 0x02 double speed, 0x01 ready */
-static uint8_t cd_status_byte(void) { return cur_disc ? 0x40 | 0x20 | 0x02 | 0x01 : 0x00; }
+/* drive status byte (cdrom.h CDROM_STATUS_*): 0x80 door (closed), 0x40 disc
+ * in, 0x20 spun up, 0x10 error, 0x02 double speed, 0x01 ready. The BIOS's MEI
+ * dipir gives up unless the door bit is set. */
+static uint8_t cd_status_byte(void) { return cur_disc ? 0x80 | 0x40 | 0x20 | 0x02 | 0x01 : 0x80; }
 
-void cdrom_insert(Disc *d) { cur_disc = d; }
+/* Inserting a disc raises attention and latches a dipir request for unit 0,
+ * which is how the BIOS learns it should validate and boot the disc. */
+void cdrom_insert(Disc *d) {
+    cur_disc = d;
+    if (d) { attention = 1; clio_dipir_request(0); }
+}
 Disc *cdrom_disc(void) { return cur_disc; }
 
 static void push(uint8_t b) { Reply *r = cd.building; if (r && r->len < 64) r->b[r->len++] = b; }
@@ -84,11 +92,13 @@ static void exec_cmd(void) {
             if (disc_track(cur_disc, i)->number == cd.cmd[2]) t = disc_track(cur_disc, i);
         uint8_t m = 0, sec = 0, f = 0;
         if (t) lba_to_msf(t->start, &m, &sec, &f);
+        /* data: reserved, ADR/control, track, reserved, M, S, F, reserved */
         push(0x00);
         push(t ? (t->type == TRK_AUDIO ? 0x10 : 0x14) : 0x00);   /* ADR 1, control: data track */
         push(t ? (uint8_t)t->number : 0);
-        push(0x00); push(0x00);
+        push(0x00);
         push(m); push(sec); push(f);
+        push(0x00);
         push(t ? cd_status_byte() : (uint8_t)(cd_status_byte() | 0x10));
         break;
     }
@@ -120,7 +130,15 @@ static void exec_cmd(void) {
 
 static int data_avail(void) { return cd.sec_valid && arm.cycles >= cd.data_ready_at; }
 
-static uint32_t cd_poll(XbusDev *d) { (void)d; return (head_ready() ? 0x10 : 0) | (data_avail() ? 0x20 : 0); }
+/* Attention (poll bit 0x80): a newly inserted disc. Cleared when the host
+ * acknowledges by writing 0x80 to the poll register. */
+
+static uint32_t cd_poll(XbusDev *d) {
+    (void)d;
+    return (head_ready() ? 0x10 : 0) | (data_avail() ? 0x20 : 0) | (attention ? 0x80 : 0);
+}
+
+void cdrom_ack_attention(void) { attention = 0; }
 
 static void load_next_sector(void) {
     cd.sec_valid = 0; cd.sec_pos = 0;

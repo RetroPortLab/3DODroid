@@ -22,3 +22,4 @@ uint8_t cdrom_data_byte(void);
 void xbus_dma_from_device(uint32_t dest, uint32_t count);
 extern uint32_t xbus_dma_count, xbus_last_dma_dest;
 extern void (*xbus_dma_hook)(uint32_t dest, uint32_t count);
+void cdrom_ack_attention(void);
