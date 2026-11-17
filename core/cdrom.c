@@ -42,7 +42,7 @@ Disc *cdrom_disc(void) { return cur_disc; }
 static void push(uint8_t b) { Reply *r = cd.building; if (r && r->len < 64) r->b[r->len++] = b; }
 
 static void exec_cmd(void) {
-    fprintf(stderr, "[cd] cmd %02x %02x %02x %02x %02x %02x %02x\n", cd.cmd[0], cd.cmd[1], cd.cmd[2], cd.cmd[3], cd.cmd[4], cd.cmd[5], cd.cmd[6]);
+    if (xbus_log) fprintf(stderr, "[cd f%llu] cmd %02x %02x %02x %02x %02x %02x %02x\n", (unsigned long long)sys.frame, cd.cmd[0], cd.cmd[1], cd.cmd[2], cd.cmd[3], cd.cmd[4], cd.cmd[5], cd.cmd[6]);
     if (cd.cmd[0] == 0x10) {                    /* READ DATA: MSF, count in bytes 5-6 */
         uint32_t lba = ((uint32_t)cd.cmd[1] * 60 + cd.cmd[2]) * 75 + cd.cmd[3];
         lba = lba >= 150 ? lba - 150 : 0;

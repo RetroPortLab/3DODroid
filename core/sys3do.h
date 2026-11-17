@@ -17,7 +17,8 @@ typedef struct {
     int log_unknown, unk_logged, log_irq, log_cap;
     uint32_t irq_watch;
     uint32_t xbus_dma_irq;
-    uint32_t watch_lo, watch_hi;      /* debug: log CPU reads in this range */            /* bring-up: which CLIO bit signals XBUS DMA done */               /* debug: backtrace when these mask0 bits are cleared */
+    uint32_t watch_lo, watch_hi;      /* debug: log CPU reads in this range */
+    uint32_t wwatch_lo, wwatch_hi;    /* debug: log CPU writes in this range */            /* bring-up: which CLIO bit signals XBUS DMA done */               /* debug: backtrace when these mask0 bits are cleared */
     uint32_t sport_color;
     uint8_t sport_buf[0x800];
     uint64_t frame;

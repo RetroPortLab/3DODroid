@@ -57,6 +57,10 @@ uint32_t bus_fetch(uint32_t a) {
 
 void bus_write32(uint32_t a, uint32_t v) {
     a &= ~3u;
+    if (a >= sys.wwatch_lo && a < sys.wwatch_hi) {
+        fprintf(stderr, "[wwatch] wr %08x = %08x pc=%08x frame=%llu\n", a, v, arm.cur_pc, (unsigned long long)sys.frame);
+        sys_backtrace("wwatch");
+    }
     if (a < RAM_SIZE) { ram_wr(a, v); return; }
     if (a >= 0x03140000 && a < 0x03180000) { sys.nvram[((a - 0x03140000) >> 2) & (NVRAM_SIZE - 1)] = (uint8_t)v; sys.nvram_dirty = 1; return; }
     if (a >= 0x03200000 && a < 0x03300000) { sport_write(a - 0x03200000, v); return; }
