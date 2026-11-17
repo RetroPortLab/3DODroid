@@ -62,3 +62,4 @@ void video_scanline(int line);
 void video_render_frame(void);
 extern uint32_t pad_buttons[2];
 extern int pad_count;
+extern uint32_t dsp_dma_next_pending;

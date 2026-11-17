@@ -29,6 +29,7 @@ uint32_t madam_read(uint32_t off) {
 }
 
 uint32_t madam_shown_fb;
+uint32_t dsp_dma_next_pending;      /* per RAM->DSP channel: next addr/len written */
 void madam_fallback_frame(void);
 
 /* Control port: daisy-chained pods shift their data in each field. A
@@ -55,6 +56,10 @@ static void pbus_transfer(uint32_t in_addr, uint32_t out_addr, uint32_t len) {
 void madam_write(uint32_t off, uint32_t v) {
     if (off < 0x800) m.reg[off >> 2] = v;
     if (off == 0x580) { m.vdl_addr = v; if (sys.log_unknown) fprintf(stderr, "[madam] VDL head = %08x\n", v); return; }
+    if (off >= 0x400 && off < 0x4D0 && ((off & 0xF) == 0xC)) {   /* next length: next buffer queued */
+        dsp_dma_next_pending |= 1u << ((off - 0x400) >> 4);
+        return;
+    }
     switch (off) {
     case 0x008:                                   /* MCTL */
         if (v & 0x8000) {                         /* player bus (control port) DMA */

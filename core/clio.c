@@ -57,7 +57,33 @@ void clio_set_line(int line) {
 /* 16 down-counters. Each control nibble: bit0 decrement, bit1 reload,
  * bit2 cascade from previous timer, bit3 interrupt on underflow (odd timers).
  * The prescaler ("slack") sets how many CPU cycles make one timer tick. */
+/* RAM -> DSP input DMA (MADAM 0x400 + 16*ch: addr, len-4, next addr, next
+ * len-4). With no DSP core, channel 0 is drained at the stereo 16-bit
+ * 44.1kHz rate; when a buffer runs out the queued next buffer is loaded
+ * and the channel's completion interrupt (word 0 bit 16 for channel 0)
+ * fires so the audio folio can queue another. */
+static int64_t dsp_dma_acc;
+static void dsp_dma_tick(int cycles) {
+    if (!((c.reg[0x300 >> 2] | c.dma_en) & 1)) return;
+    dsp_dma_acc += (int64_t)cycles * 44100 * 4;
+    int64_t bytes = dsp_dma_acc / 12500000;
+    if (!bytes) return;
+    dsp_dma_acc -= bytes * 12500000;
+    int32_t left = (int32_t)madam_reg(0x404) - (int32_t)bytes;
+    madam_set_reg(0x400, madam_reg(0x400) + (uint32_t)bytes);
+    if (left >= -4) { madam_set_reg(0x404, (uint32_t)left); return; }
+    if (dsp_dma_next_pending & 1) {
+        dsp_dma_next_pending &= ~1u;
+        madam_set_reg(0x400, madam_reg(0x408));
+        madam_set_reg(0x404, madam_reg(0x40C));
+    } else {
+        madam_set_reg(0x404, 0xFFFFFFFCu);       /* ran dry: hold */
+    }
+    clio_raise(0, 1u << 16);
+}
+
 void clio_tick(int cycles) {
+    dsp_dma_tick(cycles);
     /* bring-up HLE of the DSP's periodic interrupt (word 0 bit 11): the
      * audio folio's clock. 44100 Hz / 184 samples per tick at 12.5MHz CPU. */
     if (sys.dsp_tick_hle) {
