@@ -14,9 +14,10 @@ typedef struct {
     uint8_t  nvram[NVRAM_SIZE];
     int nvram_dirty;
     int rom_overlay;
-    int log_unknown, unk_logged, log_irq, log_cap;
+    int log_unknown, unk_logged, log_irq, log_cap, log_dsp, dsp_tick_hle;
     uint32_t irq_watch;
     uint32_t xbus_dma_irq;
+    int pbus_irq_word; uint32_t pbus_irq_bit;   /* bring-up: player bus DMA done */
     uint32_t watch_lo, watch_hi;      /* debug: log CPU reads in this range */
     uint32_t wwatch_lo, wwatch_hi;    /* debug: log CPU writes in this range */            /* bring-up: which CLIO bit signals XBUS DMA done */               /* debug: backtrace when these mask0 bits are cleared */
     uint32_t sport_color;
@@ -58,3 +59,6 @@ void clio_dipir_request(int unit);
 uint32_t sport_read(uint32_t off);
 void sport_write(uint32_t off, uint32_t mask);
 void video_scanline(int line);
+void video_render_frame(void);
+extern uint32_t pad_buttons[2];
+extern int pad_count;

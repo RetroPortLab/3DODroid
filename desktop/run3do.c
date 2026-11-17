@@ -38,6 +38,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--tracecap") && i + 1 < argc) sys.log_cap = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--xbus")) xbus_log = 1;
         else if (!strcmp(argv[i], "--irq")) sys.log_irq = 1;
+        else if (!strcmp(argv[i], "--dsp")) sys.log_dsp = 1;
+        else if (!strcmp(argv[i], "--dsptick")) sys.dsp_tick_hle = 1;
         else if (!strcmp(argv[i], "--dmairq") && i + 1 < argc) sys.xbus_dma_irq = 1u << atoi(argv[++i]);
         else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--disc") && i + 1 < argc) disc_path = argv[++i];

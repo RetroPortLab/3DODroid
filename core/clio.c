@@ -20,6 +20,7 @@ static struct {
     uint32_t dma_en, expctl;
     uint32_t dipir_req[2];           /* 0x410/0x414: device that raised attention (0x4000|unit) */
     uint64_t dma_done_at;
+    int dsp_acc;
 } c;
 
 void clio_reset(void) {
@@ -57,6 +58,13 @@ void clio_set_line(int line) {
  * bit2 cascade from previous timer, bit3 interrupt on underflow (odd timers).
  * The prescaler ("slack") sets how many CPU cycles make one timer tick. */
 void clio_tick(int cycles) {
+    /* bring-up HLE of the DSP's periodic interrupt (word 0 bit 11): the
+     * audio folio's clock. 44100 Hz / 184 samples per tick at 12.5MHz CPU. */
+    if (sys.dsp_tick_hle) {
+        c.dsp_acc += cycles;
+        const int per = 12500000 / (44100 / 184);
+        while (c.dsp_acc >= per) { c.dsp_acc -= per; clio_raise(0, 1u << 11); }
+    }
     if (c.dma_done_at && arm.cycles >= c.dma_done_at) {
         c.dma_done_at = 0;
         clio_raise(0, sys.xbus_dma_irq ? sys.xbus_dma_irq : (1u << 29));
@@ -109,10 +117,16 @@ uint32_t clio_read(uint32_t off) {
         int t = (off - 0x100) >> 3;
         return (off & 4) ? c.timer_bak[t] : c.timer_cnt[t];
     }
+    if (off == 0x3FB8 && sys.dsp_tick_hle)       /* HLE: audio kernel's 44.1kHz frame counter */
+        return (uint32_t)((arm.cycles * 44100ull / 12500000ull) & 0xFFFF);
+    if (sys.log_dsp && off >= 0x1700 && off < 0x4000)
+        fprintf(stderr, "[dsp] rd %04x = %08x pc=%08x f%llu\n", off, c.reg[(off >> 2) & 0x3FFF], arm.cur_pc, (unsigned long long)sys.frame);
     return c.reg[(off >> 2) & 0x3FFF];
 }
 
 void clio_write(uint32_t off, uint32_t v) {
+    if (sys.log_dsp && off >= 0x1700 && off < 0x4000 && !(off >= 0x1800 && off < 0x2000))
+        fprintf(stderr, "[dsp] wr %04x = %08x pc=%08x f%llu\n", off, v, arm.cur_pc, (unsigned long long)sys.frame);
     if (off >= 0x500 && off < 0x600) { xbus_write(off & ~0x3Fu, v); return; }
     c.reg[(off >> 2) & 0x3FFF] = v;
     switch (off) {
@@ -151,6 +165,11 @@ void clio_write(uint32_t off, uint32_t v) {
         }
         return;
     case 0x308: c.dma_en &= ~v; return;
+    case 0x17D0:                                 /* CPU -> DSP semaphore */
+        /* bring-up HLE: no DSP core yet, so acknowledge at once (bit 18)
+         * and echo the value as the DSP's reply */
+        c.reg[0x17D0 >> 2] = 0x40000u | (v & 0xFFFF);
+        return;
     case 0x410: c.dipir_req[0] = 0; return;
     case 0x414: c.dipir_req[1] = 0; return;
     case 0x400: c.reg[0x400 >> 2] = c.expctl |= v; return;

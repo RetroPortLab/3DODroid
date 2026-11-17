@@ -126,6 +126,7 @@ void sport_write(uint32_t off, uint32_t mask) {
 void sys_init(void) {
     memset(&sys.ram[0], 0, RAM_SIZE);
     sys.rom_overlay = 1;
+    sys.dsp_tick_hle = 1;               /* no DSP core yet: emulate the audio clock */
     madam_reset();
     clio_reset();
     cdrom_init();
@@ -154,6 +155,8 @@ void sys_run_frame(void) {
         arm.fiq_line = clio_fiq_pending();
         if (arm.halted) break;
     }
+    video_render_frame();
+    if (sys.pbus_irq_bit) clio_raise(sys.pbus_irq_word, sys.pbus_irq_bit);
     sys.frame++;
 }
 
