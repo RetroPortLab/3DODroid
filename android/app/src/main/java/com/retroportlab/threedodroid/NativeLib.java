@@ -25,6 +25,8 @@ public final class NativeLib {
     public static native void setButtons(int mask);
     public static native float getFps();
     public static native void setSound(boolean on);
+    /** Recent emulator events (CD commands, unusual hardware use) for bug reports. */
+    public static native String debugLog();
 
     // 3DO control pad bits, in the order the console's event broker uses.
     public static final int DOWN = 0x80000000, UP = 0x40000000, RIGHT = 0x20000000, LEFT = 0x10000000;

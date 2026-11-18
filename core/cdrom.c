@@ -1,5 +1,6 @@
 /* 3DODroid - CD-ROM drive on the XBUS (bring-up: logs commands) */
 #include "sys3do.h"
+#include "dbglog.h"
 #include "xbus.h"
 #include "disc.h"
 #include <stdio.h>
@@ -51,6 +52,14 @@ static void push(uint8_t b) { Reply *r = cd.building; if (r && r->len < 64) r->b
 
 static void exec_cmd(void) {
     if (xbus_log) fprintf(stderr, "[cd f%llu] cmd %02x %02x %02x %02x %02x %02x %02x\n", (unsigned long long)sys.frame, cd.cmd[0], cd.cmd[1], cd.cmd[2], cd.cmd[3], cd.cmd[4], cd.cmd[5], cd.cmd[6]);
+    if (cd.cmd[0] == 0x10)
+        dbg_stream("cd: read %02u:%02u:%02u (sector %u) x%u", cd.cmd[1], cd.cmd[2], cd.cmd[3],
+                   ((cd.cmd[1] * 60u + cd.cmd[2]) * 75u + cd.cmd[3]) - 150u, (unsigned)(cd.cmd[4] << 16 | cd.cmd[5] << 8 | cd.cmd[6]));
+    else {
+        uint32_t key = (uint32_t)cd.cmd[0] << 24 ^ (uint32_t)cd.cmd[1] << 16 ^ (uint32_t)cd.cmd[2] << 8 ^ cd.cmd[3] ^ (uint32_t)cd.cmd[6] << 4;
+        if (dbg_once(13, key)) dbg("cd: cmd %02x %02x %02x %02x %02x %02x %02x", cd.cmd[0], cd.cmd[1], cd.cmd[2], cd.cmd[3], cd.cmd[4], cd.cmd[5], cd.cmd[6]);
+        dbg_stream("cd: cmd %02x %02x %02x %02x %02x %02x %02x", cd.cmd[0], cd.cmd[1], cd.cmd[2], cd.cmd[3], cd.cmd[4], cd.cmd[5], cd.cmd[6]);
+    }
     if (cd.cmd[0] == 0x10) {                    /* READ DATA: MSF, count in bytes 5-6 */
         uint32_t lba = ((uint32_t)cd.cmd[1] * 60 + cd.cmd[2]) * 75 + cd.cmd[3];
         lba = lba >= 150 ? lba - 150 : 0;
@@ -123,6 +132,7 @@ static void exec_cmd(void) {
         push(cd_status_byte());
         break;
     default:
+        if (cd.cmd[0] != 0x09 && cd.cmd[0] != 0x02 && cd.cmd[0] != 0x08) dbg("cd: command %02x not emulated (status only)", cd.cmd[0]);
         push(cd_status_byte());
         break;
     }

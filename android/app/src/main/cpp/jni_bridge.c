@@ -16,6 +16,7 @@
 #include "xbus.h"
 #include "disc.h"
 #include "dsp.h"
+#include "dbglog.h"
 
 #define TAG "3DODroid"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -241,9 +242,16 @@ JNIEXPORT jboolean JNICALL FN(loadGame)(JNIEnv *env, jclass c, jbyteArray bios, 
         disc_cue_resolver = cue_resolve;
         disc = disc_open_as(path, t, err, sizeof err);
         disc_cue_resolver = NULL;
+        char tname[8]; snprintf(tname, sizeof tname, "%s", t);
         (*env)->ReleaseStringUTFChars(env, type, t);
         if (!disc) { snprintf(last_error, sizeof last_error, "Couldn't open the disc: %s", err); return JNI_FALSE; }
         LOGI("disc: %d tracks, %u sectors", disc_track_count(disc), disc_total_sectors(disc));
+        dbg_clear();
+        dbg("disc: %s image, %d track(s), %u sectors", tname, disc_track_count(disc), disc_total_sectors(disc));
+        for (int i = 0; i < disc_track_count(disc) && i < 99; i++) {
+            const DiscTrack *tr = disc_track(disc, i);
+            dbg("disc: track %d %s from sector %u", tr->number, tr->type == TRK_AUDIO ? "audio" : "data", tr->start);
+        }
         cdrom_insert(disc);
     }
     return JNI_TRUE;
@@ -283,3 +291,15 @@ JNIEXPORT void JNICALL FN(setPaused)(JNIEnv *env, jclass c, jboolean p) { (void)
 JNIEXPORT void JNICALL FN(setButtons)(JNIEnv *env, jclass c, jint mask) { (void)env; (void)c; buttons = (uint32_t)mask; }
 JNIEXPORT jfloat JNICALL FN(getFps)(JNIEnv *env, jclass c) { (void)env; (void)c; return fps; }
 JNIEXPORT void JNICALL FN(setSound)(JNIEnv *env, jclass c, jboolean on) { (void)env; (void)c; sound_on = on; }
+
+JNIEXPORT jstring JNICALL FN(debugLog)(JNIEnv *env, jclass c) {
+    (void)c;
+    size_t max = 600 * 1024;
+    char *buf = malloc(max);
+    if (!buf) return (*env)->NewStringUTF(env, "");
+    dbg_dump(buf, max);
+    for (char *p = buf; *p; p++) if ((unsigned char)*p >= 0x80) *p = '?';
+    jstring r = (*env)->NewStringUTF(env, buf);
+    free(buf);
+    return r;
+}

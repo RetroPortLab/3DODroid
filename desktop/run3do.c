@@ -5,6 +5,7 @@
 #include "../core/xbus.h"
 #include "../core/disc.h"
 #include "../core/dsp.h"
+#include "../core/dbglog.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,13 +47,15 @@ int main(int argc, char **argv) {
     size_t len; uint8_t *bios = slurp(argv[1], &len);
     if (!bios) { perror(argv[1]); return 1; }
     int frames = 120, shot_every = 0; const char *shot = NULL, *disc_path = NULL, *wav_path = NULL;
-    FILE *wav = NULL; uint32_t wav_frames = 0;
+    FILE *wav = NULL; uint32_t wav_frames = 0; const char *dbg_path = NULL;
     for (int i = 2; i < argc; i++) {
         if (!strcmp(argv[i], "--trace")) { sys.log_unknown = 1; if (!sys.log_cap) sys.log_cap = 400; }
         else if (!strcmp(argv[i], "--tracecap") && i + 1 < argc) sys.log_cap = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--xbus")) xbus_log = 1;
         else if (!strcmp(argv[i], "--irq")) sys.log_irq = 1;
         else if (!strcmp(argv[i], "--dsp")) sys.log_dsp = 1;
+        else if (!strcmp(argv[i], "--dbg")) dbg_echo = 1;
+        else if (!strcmp(argv[i], "--dbgdump") && i + 1 < argc) dbg_path = argv[++i];
         else if (!strcmp(argv[i], "--dsplog") && i + 1 < argc) dsp_log = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--wav") && i + 1 < argc) wav_path = argv[++i];
         else if (!strcmp(argv[i], "--dmairq") && i + 1 < argc) sys.xbus_dma_irq = 1u << atoi(argv[++i]);
@@ -103,6 +106,12 @@ int main(int argc, char **argv) {
         fwrite("data", 1, 4, wav); fwrite(&data, 4, 1, wav);
         fclose(wav);
         fprintf(stderr, "wav: %u frames (%.1f s)\n", wav_frames, wav_frames / 44100.0);
+    }
+    if (dbg_path) {
+        static char dump[600 * 1024];
+        size_t n = dbg_dump(dump, sizeof dump);
+        FILE *f = fopen(dbg_path, "w");
+        if (f) { fwrite(dump, 1, n, f); fclose(f); }
     }
     return 0;
 }

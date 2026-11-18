@@ -51,7 +51,8 @@ public class MainActivity extends Activity {
     private static final int BG = 0xFF0C0D14, PANEL = 0xFF171926, PANEL_FOCUS = 0xFF252840;
     private static final int ACCENT = 0xFFFFC247, TEXT = 0xFFF2F2F5, SUBTEXT = 0xFF9AA0B4;
 
-    private static final int PICK_GAME = 1, PICK_BIOS = 2, PICK_FOLDER = 3;
+    private static final int PICK_GAME = 1, PICK_BIOS = 2, PICK_FOLDER = 3, SAVE_LOG = 4;
+    private String pendingLog = null;
     private static final int SCREEN_LIBRARY = 0, SCREEN_SETTINGS = 1, SCREEN_GAME = 2, SCREEN_UPDATE = 3;
     private static final int BIOS_SIZE = 1 << 20;
 
@@ -528,8 +529,16 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
-        if (res != RESULT_OK || data == null || data.getData() == null) return;
+        if (res != RESULT_OK || data == null || data.getData() == null) { if (req == SAVE_LOG) pendingLog = null; return; }
         Uri u = data.getData();
+        if (req == SAVE_LOG) {
+            try (java.io.OutputStream o = getContentResolver().openOutputStream(u)) {
+                o.write(pendingLog.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                toast("Debug log saved");
+            } catch (Exception e) { toast("Couldn't save the log"); }
+            pendingLog = null;
+            return;
+        }
         if (req == PICK_FOLDER) {
             try { getContentResolver().takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION); }
             catch (Exception ignored) { }
@@ -707,12 +716,30 @@ public class MainActivity extends Activity {
         View resume = row("Resume", null, null, v -> closePauseMenu());
         panel.addView(resume);
         panel.addView(row("Reset console", "Restarts the game from the BIOS", null, v -> { NativeLib.reset(); closePauseMenu(); }));
+        panel.addView(row("Save debug log", "A small text file to send with bug reports", null, v -> saveDebugLog()));
         panel.addView(row("Quit to library", "Your saves are kept", null, v -> showLibrary()));
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(420), -2, Gravity.CENTER);
         dim.addView(panel, lp);
         pauseMenu = dim;
         root.addView(dim, new FrameLayout.LayoutParams(-1, -1));
         resume.requestFocus();
+    }
+
+    private void saveDebugLog() {
+        StringBuilder b = new StringBuilder();
+        b.append("3DODroid v").append(versionName()).append("\n");
+        b.append("Device: ").append(android.os.Build.MANUFACTURER).append(' ').append(android.os.Build.MODEL)
+                .append(", Android ").append(android.os.Build.VERSION.RELEASE).append("\n");
+        b.append("Game: ").append(gameTitle).append("\n\n");
+        b.append(NativeLib.debugLog());
+        pendingLog = b.toString();
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("text/plain");
+        String safe = gameTitle == null ? "game" : gameTitle.replaceAll("[^A-Za-z0-9]+", "-").replaceAll("^-|-$", "");
+        i.putExtra(Intent.EXTRA_TITLE, "3dodroid-log-" + safe + ".txt");
+        try { startActivityForResult(i, SAVE_LOG); }
+        catch (Exception e) { toast("No file picker available"); }
     }
 
     private void closePauseMenu() {

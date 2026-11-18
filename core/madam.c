@@ -2,6 +2,7 @@
  * Bring-up skeleton: registers are shadowed and logged; the cel engine and
  * display list walker are filled in as the BIOS exercises them. */
 #include "sys3do.h"
+#include "dbglog.h"
 #include "dsp.h"
 #include <string.h>
 #include <stdio.h>
@@ -23,6 +24,7 @@ uint32_t madam_read(uint32_t off) {
     }
     if (off >= 0x400 && off < 0x540) return dsp_fifo_read(off);
     if (off < 0x800) return m.reg[off >> 2];
+    if (dbg_once(3, off)) dbg("madam: unhandled read %04x pc=%08x", off, arm.cur_pc);
     if (sys.log_unknown && sys.unk_logged < sys.log_cap) {
         sys.unk_logged++;
         fprintf(stderr, "[madam] rd %03x pc=%08x\n", off, arm.cur_pc);
@@ -79,6 +81,7 @@ void madam_write(uint32_t off, uint32_t v) {
     case 0x110: case 0x130: case 0x134: case 0x138: case 0x13C: case 0x5A4:
         return;                                   /* latched, used at start */
     }
+    if (dbg_once(4, off)) dbg("madam: unhandled write %04x = %08x pc=%08x", off, v, arm.cur_pc);
     if (sys.log_unknown && sys.unk_logged < sys.log_cap) {
         sys.unk_logged++;
         fprintf(stderr, "[madam] wr %03x = %08x pc=%08x\n", off, v, arm.cur_pc);
@@ -104,6 +107,7 @@ static void clut_reset(void) {
 }
 
 static void vdl_colour_word(uint32_t w) {
+    if ((w & 0xC0000000u) == 0xC0000000u && dbg_once(10, w)) dbg("vdl: display control word %08x", w);
     if ((w & 0xE0000000u) == 0xE0000000u) { bg_color = w & 0xFFFFFF; return; }
     if ((w & 0xC0000000u) == 0xC0000000u) return;           /* display control: not modelled yet */
     if (w & 0x80000000u) return;                            /* AMY control */
@@ -128,6 +132,7 @@ void video_render_frame(void) {
     while (vline < VBLANK_LINES + 240 && guard++ < 256 && vdl && vdl < RAM_SIZE) {
         uint32_t ctl = mem_rd32(vdl), next = mem_rd32(vdl + 12);
         int nwords = (ctl >> 9) & 0x3F, nlines = ctl & 0x1FF;
+        if (dbg_once(9, ctl & ~0x1FFu)) dbg("vdl: entry control %08x at %08x", ctl, vdl);
         if (ctl & 0x10000u) cur = mem_rd32(vdl + 4);       /* LDCUR */
         int dma_on = (ctl & 0x200000u) != 0;
         for (int i = 0; i < nwords; i++) vdl_colour_word(mem_rd32(vdl + 16 + i * 4));

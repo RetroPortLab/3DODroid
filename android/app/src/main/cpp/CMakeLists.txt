@@ -4,7 +4,7 @@ project(threedodroid_native C)
 # Emulator core and libchdr live at the repository root.
 set(ROOT ${CMAKE_CURRENT_LIST_DIR}/../../../../..)
 set(CHDR ${ROOT}/third_party/libchdr)
-file(GLOB CORE_SRCS ${ROOT}/core/*.c)
+file(GLOB CORE_SRCS CONFIGURE_DEPENDS ${ROOT}/core/*.c)
 
 add_library(chdr STATIC ${CHDR}/unity.c ${CHDR}/src/libchdr_codec_avhuff.c)
 target_include_directories(chdr PRIVATE ${CHDR}/include ${CHDR}/deps/lzma-26.02/include

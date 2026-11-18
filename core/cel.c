@@ -19,6 +19,7 @@
  * (x, 2n) in its upper half and (x, 2n+1) in its lower half. */
 #include "sys3do.h"
 #include "cel.h"
+#include "dbglog.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -313,6 +314,11 @@ void cel_run(void) {
         }
         c.bpp = bpp_tab[c.pre0 & 7];
         c.linear = (c.pre0 & 0x10) != 0;
+        {
+            uint32_t key = (c.pre0 & 0x17) | (c.packed << 5) | ((c.flags & 0x1DF0) << 4);
+            if (dbg_once(8, key ^ (c.pixc * 2654435761u)))
+                dbg("cel: mode flags %08x pre0 %08x pre1 %08x pixc %08x", c.flags, c.pre0, c.pre1, c.pixc);
+        }
         if (!(c.flags & F_SKIP) && c.bpp) {
             cel.cels_drawn++;
             draw_cel(&c, srca, x, y);

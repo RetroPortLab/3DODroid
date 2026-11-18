@@ -8,13 +8,17 @@
  *   0x03400000             CLIO
  */
 #include "sys3do.h"
+#include "dbglog.h"
 #include "xbus.h"
+#include "cel.h"
+#include "dbglog.h"
 #include <string.h>
 #include <stdio.h>
 
 Sys3do sys;
 
 static void unk(const char *what, uint32_t a, uint32_t v) {
+    if (dbg_once(1, a)) dbg("bus: unmapped %s %08x = %08x pc=%08x", what, a, v, arm.cur_pc);
     if (sys.log_unknown && sys.unk_logged < sys.log_cap) {
         sys.unk_logged++;
         fprintf(stderr, "[bus] %s %08x = %08x  pc=%08x\n", what, a, v, arm.cur_pc);
@@ -103,6 +107,7 @@ static uint32_t sport_page(uint32_t off) { return 0x200000u + (((off >> 2) & 0x1
 
 uint32_t sport_read(uint32_t off) {
     if (off & 0x6000) return 0;
+    if (dbg_once(11, off)) dbg("sport: unhandled read %05x pc=%08x", off, arm.cur_pc);
     if (sys.log_unknown) fprintf(stderr, "[sport] rd %05x pc=%08x\n", off, arm.cur_pc);
     uint32_t pg = sport_page(off);
     if (pg + 0x800 <= RAM_SIZE) memcpy(sys.sport_buf, sys.ram + pg, 0x800);
@@ -110,6 +115,7 @@ uint32_t sport_read(uint32_t off) {
 }
 
 void sport_write(uint32_t off, uint32_t mask) {
+    if (dbg_once(12, off)) dbg("sport: unhandled write %05x mask=%08x pc=%08x", off, mask, arm.cur_pc);
     if (sys.log_unknown) fprintf(stderr, "[sport] wr %05x mask=%08x pc=%08x\n", off, mask, arm.cur_pc);
     uint32_t pg = sport_page(off);
     if (pg + 0x800 > RAM_SIZE) { unk("sport", off, mask); return; }
@@ -155,6 +161,7 @@ void sys_run_frame(void) {
         if (arm.halted) break;
     }
     video_render_frame();
+    if (sys.frame % 300 == 0) dbg_stream("heartbeat: pc %08x mode %02x cels %llu", arm.r[15], arm.mode, (unsigned long long)cel.cels_drawn);
     if (sys.pbus_irq_bit) clio_raise(sys.pbus_irq_word, sys.pbus_irq_bit);
     sys.frame++;
 }

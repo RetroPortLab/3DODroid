@@ -2,6 +2,7 @@
  * Register offsets follow the public Opera hardware notes; anything not yet
  * understood is stored and logged so BIOS bring-up can fill it in. */
 #include "sys3do.h"
+#include "dbglog.h"
 #include "dsp.h"
 #include <string.h>
 #include <stdio.h>
@@ -141,11 +142,13 @@ void clio_write(uint32_t off, uint32_t v) {
         if (sys.irq_watch && (v & sys.irq_watch)) sys_backtrace("mask0 set");
         if (sys.log_irq) fprintf(stderr, "[irq] mask0 |= %08x pc=%08x\n", v, arm.cur_pc);
         c.mask[0] |= v;
+        if (dbg_once(14, v)) dbg("irq: enable word0 %08x -> %08x", v, c.mask[0]);
         return;
     case 0x4C:
         if (sys.irq_watch && (v & sys.irq_watch)) sys_backtrace("mask0 clear");
         if (sys.log_irq) fprintf(stderr, "[irq] mask0 &= ~%08x pc=%08x\n", v, arm.cur_pc);
         c.mask[0] &= ~v;
+        if (dbg_once(15, v)) dbg("irq: disable word0 %08x -> %08x", v, c.mask[0]);
         return;
     case 0x60: clio_raise(1, v); return;
     case 0x64: c.pend[1] &= ~v; if (!(c.pend[1] & c.mask[1])) c.pend[0] &= ~0x80000000u; return;
@@ -199,6 +202,7 @@ void clio_write(uint32_t off, uint32_t v) {
         if (off & 4) c.timer_bak[t] = v & 0xFFFF; else c.timer_cnt[t] = v & 0xFFFF;
         return;
     }
+    if (dbg_once(2, off)) dbg("clio: unhandled write %04x = %08x pc=%08x", off, v, arm.cur_pc);
     if (sys.log_unknown && sys.unk_logged < sys.log_cap) {
         sys.unk_logged++;
         fprintf(stderr, "[clio] wr %03x = %08x pc=%08x\n", off, v, arm.cur_pc);

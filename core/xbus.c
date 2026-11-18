@@ -17,6 +17,7 @@
  * Behaviour worked out by watching the BIOS XBUS driver; the CD drive
  * personality lives in cdrom.c. */
 #include "sys3do.h"
+#include "dbglog.h"
 #include "xbus.h"
 #include <string.h>
 #include <stdio.h>
@@ -58,7 +59,7 @@ void xbus_write(uint32_t off, uint32_t v) {
     XbusDev *d = cur();
     logx("wr", off, v);
     switch (off) {
-    case 0x500: sel = v & 0xFF; break;
+    case 0x500: sel = v & 0xFF; if (dbg_once(7, sel)) dbg("xbus: unit %02x selected%s", sel, (sel != 0x8F && !xbus_dev[sel & 15]) ? " (empty slot)" : ""); break;
     case 0x540:
         if (d) d->poll_en = v & 0x0F;
         if (d && (v & 0x80) && d == xbus_dev[0]) cdrom_ack_attention();
@@ -88,6 +89,7 @@ void xbus_dma_from_device(uint32_t dest, uint32_t count) {
         }
     }
     xbus_dma_count++; xbus_last_dma_dest = dest;
+    dbg_stream("xbus: dma %u bytes -> %08x", count, dest);
     if (xbus_dma_hook) xbus_dma_hook(dest, count);
     if (xbus_log) fprintf(stderr, "[xbus] dma %u bytes -> %08x\n", count, dest);
 }

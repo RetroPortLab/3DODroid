@@ -3,6 +3,7 @@
  * IRQ/FIQ lines, LDM/STM user-bank and CPSR-restore forms.
  * Timing: S/N cycle approximation (1 cycle per instruction, +loads/stores). */
 #include "arm60.h"
+#include "dbglog.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -48,6 +49,8 @@ void arm_set_cpsr(uint32_t v) {
 }
 
 static void exception(uint32_t vec, uint32_t mode, uint32_t ret, int disable_fiq) {
+    if (vec == 0x04 && dbg_once(5, arm.cur_pc)) dbg("arm: undefined instruction %08x at %08x", bus_read32(arm.cur_pc), arm.cur_pc);
+    if (vec == 0x08) { uint32_t n = bus_read32(arm.cur_pc) & 0xFFFFFF; if (dbg_once(6, n)) dbg("arm: first SWI %06x from %08x", n, arm.cur_pc); }
     if (vec == 0x04 && arm.log_undef && arm.log_undef-- > 0)
         fprintf(stderr, "[arm] undefined instruction %08x at %08x (mode %02x)\n", bus_read32(arm.cur_pc), arm.cur_pc, arm.mode);
     uint32_t old = arm_cpsr();
