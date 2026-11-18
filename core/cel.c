@@ -36,6 +36,8 @@
 #define F_ACW     0x00040000u
 #define F_ACCW    0x00020000u
 #define F_TWD     0x00010000u
+#define F_PXOR    0x00000800u
+#define F_USEAV   0x00000400u
 #define F_PACKED  0x00000200u
 #define F_POVER   0x00000180u
 #define F_PLUTPOS 0x00000040u
@@ -72,24 +74,32 @@ static const int bpp_tab[8] = { 0, 1, 2, 4, 6, 8, 16, 0 };
 typedef struct {
     uint32_t flags, plut, pixc, pre0, pre1;
     int bpp, linear, packed;
-    uint32_t amv;     /* multiplier from 8bpp coded pixel */
+    uint32_t amv;     /* per-channel multipliers (3 bits each, R:G:B) from coded pixels */
 } Ctx;
+
+#define AMV_ONE 0x49  /* multiplier field 1 in each channel (FreeDO's default) */
 
 /* decode one raw source pixel into 15-bit RGB + P bit; returns -1 if transparent */
 static int decode(Ctx *c, uint32_t raw, uint16_t *out, int *pbit) {
     uint16_t col;
-    c->amv = 0;
+    c->amv = AMV_ONE;
     if (c->bpp == 16) {
         if (c->linear) col = (uint16_t)raw;
-        else col = mem_rd16(c->plut + (((raw >> 10) & 31) * 2)) | (uint16_t)(raw & 0x8000);  /* rare */
+        else {                                  /* coded 16bpp: 5-bit index, 3-bit R/G/B multipliers, P bit */
+            col = (uint16_t)((mem_rd16(c->plut + (raw & 31) * 2) & 0x7FFF) | (raw & 0x8000));
+            c->amv = (raw >> 5) & 0x1FF;
+        }
     } else if (c->bpp == 8 && c->linear) {
         /* uncoded 8bpp: RRRGGGBB expanded to 5:5:5 */
         uint32_t r = (raw >> 5) & 7, g = (raw >> 2) & 7, b = raw & 3;
         col = (uint16_t)(((r << 2 | r >> 1) << 10) | ((g << 2 | g >> 1) << 5) | (b << 3 | b << 1 | b >> 1));
     } else {
         uint32_t idx;
-        if (c->bpp == 8) { idx = raw & 31; c->amv = (raw >> 5) & 7; }
-        else if (c->bpp == 6) idx = raw & 31;
+        if (c->bpp == 8) {                      /* coded 8bpp: 5-bit index, 3-bit multiplier for all channels */
+            uint32_t m = (raw >> 5) & 7;
+            idx = raw & 31;
+            c->amv = m << 6 | m << 3 | m;
+        } else if (c->bpp == 6) idx = raw & 31;
         else {
             /* 1/2/4 bpp: low bits come from the pixel, upper from PLUTA */
             uint32_t mask = (1u << c->bpp) - 1;
@@ -97,7 +107,7 @@ static int decode(Ctx *c, uint32_t raw, uint16_t *out, int *pbit) {
             idx = (idx | (raw & mask)) & 31;
         }
         col = mem_rd16(c->plut + idx * 2);
-        if (c->bpp == 6 && (raw & 0x20)) col |= 0x8000;
+        if (c->bpp == 6) col = (uint16_t)((col & 0x7FFF) | ((raw & 0x20) ? 0x8000 : 0));
     }
     *pbit = col >> 15;
     *out = col & 0x7FFF;
@@ -105,27 +115,56 @@ static int decode(Ctx *c, uint32_t raw, uint16_t *out, int *pbit) {
     return 0;
 }
 
-/* ---- pixel processor ---- */
+/* ---- pixel processor ----
+ * Behaviour as described by the FreeDO project (see README credits).
+ * PIXC half (chosen by the P bit or the CCB's POVER override):
+ *   15 1S   first source: 0 cel pixel, 1 frame buffer pixel
+ *   14-13 MS multiplier: 0 MF field, 1 AMV from the pixel, 2 cel colour
+ *            (multiplier and divider per channel), 3 cel colour (multiplier only)
+ *   12-10 MF multiplier - 1      9-8 DF divider: 16, 2, 4, 8
+ *   7-6 2S  second source: 0, AV, frame buffer, cel      5-1 AV   0 2D: halve the sum
+ * With USEAV in the CCB, AV also controls: bit0 subtract, bit1 sign-extend,
+ * bit2 no clipping, bits 3-4 shift the second source right. */
+static const uint8_t df_shift[4] = { 4, 1, 2, 3 };
+
 static inline uint16_t pixproc(Ctx *c, uint16_t src, int pbit, uint16_t dst) {
     uint32_t pov = (c->flags & F_POVER) >> 7;
     int sel = pov == 2 ? 0 : pov == 3 ? 1 : pbit;
     uint32_t p = sel ? (c->pixc >> 16) : (c->pixc & 0xFFFF);
-    if (p == 0x1F00) return src;                       /* the common opaque case */
-    int s1 = (p >> 15) & 1, ms = (p >> 13) & 3, mf = ((p >> 10) & 7) + 1, df = (p >> 8) & 3;
+    if (p == 0x1F00 && (src || (c->flags & F_NOBLK))) return src;   /* the common opaque case */
+    int s1 = (p >> 15) & 1, ms = (p >> 13) & 3, mf = (p >> 10) & 7, df = (p >> 8) & 3;
     int s2 = (p >> 6) & 3, av = (p >> 1) & 31, div2 = p & 1;
-    static const int dtab[4] = { 16, 2, 4, 8 };
-    int mul = ms == 0 ? mf : ms == 1 ? (int)c->amv + 1 : mf;
-    int dv = dtab[df];
-    uint16_t a = s1 ? dst : src;
+    int neg = 0, xtend = 0, noclip = 0, dv3 = 0;
+    if (c->flags & F_USEAV) { neg = av & 1; xtend = (av >> 1) & 1; noclip = (av >> 2) & 1; dv3 = (av >> 3) & 3; }
+    int pxor = (c->flags & F_PXOR) != 0;
+    uint16_t in1 = s1 ? dst : src;
     uint32_t out = 0;
-    for (int sh = 0; sh <= 10; sh += 5) {
-        int ca = (a >> sh) & 31, cb;
-        switch (s2) { case 0: cb = 0; break; case 1: cb = av; break; case 2: cb = (dst >> sh) & 31; break; default: cb = (src >> sh) & 31; break; }
-        if (div2) cb >>= 1;
-        int v = ca * mul / dv + cb;
-        if (v > 31) v = 31;
-        out |= (uint32_t)v << sh;
+    for (int sh = 10; sh >= 0; sh -= 5) {                 /* R, G, B */
+        int ch = (sh == 10) ? 6 : (sh == 5) ? 3 : 0;      /* AMV field for this channel */
+        int a = (in1 >> sh) & 31, cs = (src >> sh) & 31, m, d;
+        switch (ms) {
+        case 0:  m = mf; d = df_shift[df]; break;
+        case 1:  m = (int)(c->amv >> ch) & 7; d = df_shift[df]; break;
+        case 2:  m = cs >> 2; d = df_shift[cs & 3]; break;
+        default: m = cs >> 2; d = df_shift[df]; break;
+        }
+        int c1 = (a * (m + 1)) >> d, c2;
+        switch (s2) {
+        case 0:  c2 = 0; break;
+        case 1:  c2 = av >> dv3; break;
+        case 2:  c2 = ((dst >> sh) & 31) >> dv3; break;
+        default: c2 = cs >> dv3; break;
+        }
+        int aop, bop;
+        if (pxor) { aop = 0; c1 &= 31; bop = neg ? (~c2 & 0xFF) : (c2 ^ c1); }
+        else      { aop = c1; bop = neg ? (~c2 & 0xFF) : c2; }
+        if (bop & 0x80) bop -= 256;                       /* 8-bit signed lanes */
+        if (xtend) bop = (bop & 16) ? (bop | ~31) : (bop & 31);
+        int v = (aop + bop + neg) >> div2;
+        if (!noclip) v = v < 0 ? 0 : v > 31 ? 31 : v;
+        out |= (uint32_t)(v & 31) << sh;
     }
+    if (!(c->flags & F_NOBLK) && out == 0) out = 0x0400;  /* black would be transparent: use near-black */
     return (uint16_t)out;
 }
 
