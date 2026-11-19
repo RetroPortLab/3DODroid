@@ -1,32 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 3DODroid launcher foreground: a CD with a gold ring and hub, behind a bold "3". -->
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
-    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <path android:pathData="M54,26 a28,28 0 1,0 0.01,0 z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="sweep" android:centerX="54" android:centerY="54">
-                <item android:offset="0" android:color="#FF8FD3FF" />
-                <item android:offset="0.25" android:color="#FFC9A4FF" />
-                <item android:offset="0.5" android:color="#FFFFD58A" />
-                <item android:offset="0.75" android:color="#FF9EF0C8" />
-                <item android:offset="1" android:color="#FF8FD3FF" />
-            </gradient>
-        </aapt:attr>
-    </path>
-    <path android:fillColor="#FF0E0D24" android:pathData="M54,47 a7,7 0 1,0 0.01,0 z" />
-    <path android:strokeColor="#FFFFC247" android:strokeWidth="2" android:fillColor="#00000000" android:pathData="M54,44 a10,10 0 1,0 0.01,0 z" />
-    <group android:translateX="1.5" android:translateY="1.5">
-        <path android:fillColor="#80000000" android:pathData="M38,30 h24 c7,0 11,4 11,10 c0,4 -2,7 -6,8.5 c4.5,1.4 7,4.6 7,9.5 c0,7 -5,12 -13,12 h-23 v-9 h21 c2.6,0 4,-1.4 4,-3.6 c0,-2.2 -1.4,-3.6 -4,-3.6 h-14 v-8.6 h13 c2.4,0 3.6,-1.2 3.6,-3.2 c0,-2 -1.2,-3.2 -3.6,-3.2 h-20 z" />
-    </group>
-    <path android:strokeColor="#FF1A1830" android:strokeWidth="1" android:pathData="M38,30 h24 c7,0 11,4 11,10 c0,4 -2,7 -6,8.5 c4.5,1.4 7,4.6 7,9.5 c0,7 -5,12 -13,12 h-23 v-9 h21 c2.6,0 4,-1.4 4,-3.6 c0,-2.2 -1.4,-3.6 -4,-3.6 h-14 v-8.6 h13 c2.4,0 3.6,-1.2 3.6,-3.2 c0,-2 -1.2,-3.2 -3.6,-3.2 h-20 z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="linear" android:startX="0" android:startY="30" android:endX="0" android:endY="70">
-                <item android:offset="0" android:color="#FFFFFFFF" />
-                <item android:offset="0.5" android:color="#FFDCDDEA" />
-                <item android:offset="0.52" android:color="#FFA2A5BA" />
-                <item android:offset="1" android:color="#FFECEDF4" />
-            </gradient>
-        </aapt:attr>
-    </path>
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="80" android:viewportHeight="80">
+<group android:pivotX="40" android:pivotY="40" android:scaleX="0.72" android:scaleY="0.72">
+<path android:fillColor="#FFFFE29A" android:fillAlpha="1" android:pathData="M40,14 L61,26 L40,38 L19,26 Z"/>
+<path android:fillColor="#FFFFC247" android:fillAlpha="1" android:pathData="M19,26 L40,38 L40,62 L19,50 Z"/>
+<path android:fillColor="#FFC98F1A" android:fillAlpha="1" android:pathData="M61,26 L40,38 L40,62 L61,50 Z"/>
+<path android:fillColor="#FFFFC247" android:fillAlpha="1" android:pathData="M15.5,68 H64.5 A1.5,1.5 0 0 1 64.5,71 H15.5 A1.5,1.5 0 0 1 15.5,68 Z"/>
+</group>
 </vector>

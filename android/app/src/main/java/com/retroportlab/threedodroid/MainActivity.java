@@ -344,12 +344,15 @@ public class MainActivity extends Activity {
         screen = SCREEN_SETTINGS;
         LinearLayout list = new LinearLayout(this);
         page("Settings", list, pill("Back", v -> showLibrary()));
-        list.addView(sectionTitle("Console"));
-        View bios = row("BIOS", "The 1 MB ROM from your own 3DO (for example panafz10.bin)",
-                haveBios() ? "Loaded" : "Not set", v -> pick(PICK_BIOS));
-        list.addView(bios);
-        list.addView(row("Games folder", folderLabel(), "Change", v -> pick(PICK_FOLDER)));
-        list.addView(sectionTitle("Sound and display"));
+        list.addView(sectionTitle("Display"));
+        LinearLayout fps = row("Show FPS", null, prefs.getBoolean("showFps", false) ? "On" : "Off", null);
+        fps.setOnClickListener(v -> {
+            boolean on = !prefs.getBoolean("showFps", false);
+            prefs.edit().putBoolean("showFps", on).apply();
+            setRowValue(fps, on ? "On" : "Off");
+        });
+        list.addView(fps);
+        list.addView(sectionTitle("Audio"));
         LinearLayout snd = row("Sound", null, prefs.getBoolean("sound", true) ? "On" : "Off", null);
         snd.setOnClickListener(v -> {
             boolean on = !prefs.getBoolean("sound", true);
@@ -357,14 +360,13 @@ public class MainActivity extends Activity {
             setRowValue(snd, on ? "On" : "Off");
         });
         list.addView(snd);
-        LinearLayout fps = row("Show frame rate", null, prefs.getBoolean("showFps", false) ? "On" : "Off", null);
-        fps.setOnClickListener(v -> {
-            boolean on = !prefs.getBoolean("showFps", false);
-            prefs.edit().putBoolean("showFps", on).apply();
-            setRowValue(fps, on ? "On" : "Off");
-        });
-        list.addView(fps);
-        list.addView(sectionTitle("Updates"));
+        list.addView(sectionTitle("System"));
+        View bios = row("BIOS", "The 1 MB ROM from your own 3DO (for example panafz10.bin)",
+                haveBios() ? "Loaded" : "Not set", v -> pick(PICK_BIOS));
+        list.addView(bios);
+        list.addView(sectionTitle("Library"));
+        list.addView(row("Games folder", folderLabel(), "Change", v -> pick(PICK_FOLDER)));
+        list.addView(sectionTitle("About"));
         LinearLayout auto = row("Check automatically", "Looks on GitHub for a new version at most twice a day",
                 prefs.getBoolean("autoUpdate", true) ? "On" : "Off", null);
         auto.setOnClickListener(v -> {
@@ -376,7 +378,6 @@ public class MainActivity extends Activity {
         final View[] check = new View[1];
         check[0] = row("Check for updates now", "You have v" + versionName(), "", v -> checkForUpdate(check[0]));
         list.addView(check[0]);
-        list.addView(sectionTitle("About"));
         TextView about = text("3DODroid v" + versionName() + " is an experimental 3DO emulator written from scratch. "
                 + "It needs your own BIOS dump. Not affiliated with The 3DO Company or Panasonic.", 14, SUBTEXT, false);
         about.setPadding(dp(4), 0, dp(4), dp(12));

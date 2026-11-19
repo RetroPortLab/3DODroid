@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Single-colour layer for Android 13+ themed icons. -->
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#FFFFFFFF" android:fillAlpha="0.45" android:pathData="M54,26 a28,28 0 1,0 0.01,0 z M54,47 a7,7 0 1,1 -0.01,0 z" />
-    <path android:fillColor="#FFFFFFFF" android:pathData="M38,30 h24 c7,0 11,4 11,10 c0,4 -2,7 -6,8.5 c4.5,1.4 7,4.6 7,9.5 c0,7 -5,12 -13,12 h-23 v-9 h21 c2.6,0 4,-1.4 4,-3.6 c0,-2.2 -1.4,-3.6 -4,-3.6 h-14 v-8.6 h13 c2.4,0 3.6,-1.2 3.6,-3.2 c0,-2 -1.2,-3.2 -3.6,-3.2 h-20 z" />
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="80" android:viewportHeight="80">
+<group android:pivotX="40" android:pivotY="40" android:scaleX="0.72" android:scaleY="0.72">
+<path android:fillColor="#FFFFFFFF" android:fillAlpha="1" android:pathData="M40,14 L61,26 L40,38 L19,26 Z"/>
+<path android:fillColor="#FFFFFFFF" android:fillAlpha="1" android:pathData="M19,26 L40,38 L40,62 L19,50 Z"/>
+<path android:fillColor="#FFFFFFFF" android:fillAlpha="0.55" android:pathData="M61,26 L40,38 L40,62 L61,50 Z"/>
+</group>
 </vector>
